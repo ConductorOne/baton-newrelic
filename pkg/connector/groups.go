@@ -114,7 +114,6 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 	}
 
 	return rv, bag.PageToken(), nil, nil
-
 }
 
 // Entitlements always returns an empty slice for groups.
@@ -159,7 +158,6 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 				Resource:     uId,
 			},
 		))
-
 	}
 
 	return rv, next, nil, nil

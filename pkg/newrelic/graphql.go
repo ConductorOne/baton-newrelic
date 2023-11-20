@@ -124,7 +124,6 @@ func composeRolesQuery() string {
 			%s
 			%s
 		}`, baseQ, RolesQ)
-
 }
 
 func composeGroupsQuery() string {
