@@ -17,6 +17,14 @@ type Org struct {
 	Name string `json:"name"`
 }
 
+type Domain struct {
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	NextCursor string  `json:"nextCursor"`
+	Total      int     `json:"totalCount"`
+	Groups     []Group `json:"groups"`
+}
+
 type Group struct {
 	BaseResource
 	Name  string `json:"displayName"`

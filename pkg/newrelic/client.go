@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 )
 
 const (
@@ -37,11 +36,16 @@ func NewClient(httpClient *http.Client, apikey string) *Client {
 
 func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, error) {
 	var res UsersResponse
+	variables := map[string]interface{}{}
+
+	if cursor != "" {
+		variables["userCursor"] = cursor
+	}
 
 	err := c.Query(
 		ctx,
 		composeUsersQuery(),
-		map[string]interface{}{"cursor": cursor},
+		variables,
 		&res,
 	)
 	if err != nil {
@@ -66,11 +70,16 @@ func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 
 func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, error) {
 	var res RolesResponse
+	variables := map[string]interface{}{}
+
+	if cursor != "" {
+		variables["roleCursor"] = cursor
+	}
 
 	err := c.Query(
 		ctx,
 		composeRolesQuery(),
-		map[string]interface{}{"cursor": cursor},
+		variables,
 		&res,
 	)
 	if err != nil {
@@ -82,60 +91,99 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		nil
 }
 
-func parseCursor(cursor string) (string, string) {
-	parts := strings.Split(cursor, "-")
-	domainCursor, groupCursor := parts[0], parts[1]
-
-	return domainCursor, groupCursor
-}
-
-func (c *Client) ListGroupsWithRole(ctx context.Context, roleId, cursor string) ([][]Group, string, []string, error) {
+// ListGroupsWithRole returns groups with specified role under also specified domain.
+func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, cursor string) ([]Group, string, error) {
 	var res GroupsResponse
 	variables := map[string]interface{}{
-		"roleId": roleId,
+		"domainId": domainId,
+		"roleId":   roleId,
 	}
 
+	// set variables for pagination
 	if cursor != "" {
-		domainCursor, groupCursor := parseCursor(cursor)
-
-		variables["domainCursor"] = domainCursor
-		variables["groupCursor"] = groupCursor
+		variables["groupCursor"] = cursor
 	}
 
 	err := c.Query(
 		ctx,
-		composeGroupsQuery(),
+		composeAllGroupsWithRoleQuery(),
 		variables,
 		&res,
 	)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", err
 	}
-
-	var groupsCursors []string
-	var groups [][]Group
 
 	domains := res.Data.Actor.Organization.Management.Domains
-	domainsCursor := domains.NextCursor
-	for _, d := range domains.Domains {
-		groups = append(groups, d.Groups.Groups)
-		groupsCursors = append(groupsCursors, d.Groups.NextCursor)
+
+	if len(domains.Domains) == 0 {
+		return nil, "", fmt.Errorf("domain not found: %s", domainId)
 	}
 
-	return groups, domainsCursor, groupsCursors, nil
+	if len(domains.Domains) > 1 {
+		return nil, "", fmt.Errorf("invalid id(%s) or cursor(%s), found more domains", domainId, cursor)
+	}
+
+	groups := domains.Domains[0].Groups.Groups
+
+	return groups, domains.NextCursor, nil
 }
 
-func (c *Client) ListGroups(ctx context.Context, cursor string) ([][]Group, string, []string, error) {
-	var res GroupsResponse
-	var variables map[string]interface{}
-
-	if cursor != "" {
-		domainCursor, groupCursor := parseCursor(cursor)
-
-		variables = map[string]interface{}{
-			"domainCursor": domainCursor,
-			"groupCursor":  groupCursor,
+// ListDomains returns all authentication domains.
+func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, string, error) {
+	var res OrgAuthManagementResponse[struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		Groups struct {
+			Total int `json:"totalCount"`
 		}
+	}]
+	variables := map[string]interface{}{}
+
+	// set variables for pagination
+	if cursor != "" {
+		variables["cursor"] = cursor
+	}
+
+	err := c.Query(
+		ctx,
+		composeDomainsQuery(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var ad []Domain
+	nextDomains := res.Data.Actor.Organization.Management.Domains.NextCursor
+	domains := res.Data.Actor.Organization.Management.Domains.Domains
+	for _, d := range domains {
+		domain := Domain{
+			ID:    d.ID,
+			Name:  d.Name,
+			Total: d.Groups.Total,
+		}
+
+		ad = append(
+			ad,
+			domain,
+		)
+	}
+
+	return ad, nextDomains, nil
+}
+
+// ListGroups returns groups with roles under specific domain.
+func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Group, string, error) {
+	var res GroupsResponse
+	variables := map[string]interface{}{
+		"domainId": domainId,
+	}
+
+	// set variables for pagination
+	if cursor != "" {
+		variables["groupCursor"] = cursor
 	}
 
 	err := c.Query(
@@ -145,32 +193,38 @@ func (c *Client) ListGroups(ctx context.Context, cursor string) ([][]Group, stri
 		&res,
 	)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", err
 	}
-
-	var groupsCursors []string
-	var groups [][]Group
 
 	domains := res.Data.Actor.Organization.Management.Domains
-	domainsCursor := domains.NextCursor
-	for _, d := range domains.Domains {
-		groups = append(groups, d.Groups.Groups)
-		groupsCursors = append(groupsCursors, d.Groups.NextCursor)
+	if len(domains.Domains) == 0 {
+		return nil, "", fmt.Errorf("domain not found: %s", domainId)
 	}
 
-	return groups, domainsCursor, groupsCursors, nil
+	if len(domains.Domains) > 1 {
+		return nil, "", fmt.Errorf("invalid id(%s) or cursor(%s), found more domains", domainId, cursor)
+	}
+
+	groups := domains.Domains[0].Groups.Groups
+
+	return groups, domains.NextCursor, nil
 }
 
-func (c *Client) ListGroupMembers(ctx context.Context, groupId, domainCursor string) ([]string, string, error) {
+func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, membersCursor string) ([]string, string, error) {
 	var res GroupMembersResponse
+	variables := map[string]interface{}{
+		"domainId": domainId,
+		"groupId":  groupId,
+	}
+
+	if membersCursor != "" {
+		variables["membersCursor"] = membersCursor
+	}
 
 	err := c.Query(
 		ctx,
 		composeGroupMembersQuery(),
-		map[string]interface{}{
-			"groupId":      groupId,
-			"domainCursor": domainCursor,
-		},
+		variables,
 		&res,
 	)
 	if err != nil {

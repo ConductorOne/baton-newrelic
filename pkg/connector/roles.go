@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -121,51 +122,90 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 		return nil, "", nil, err
 	}
 
-	rolesTrait, err := rs.GetRoleTrait(resource)
-	if err != nil {
-		return nil, "", nil, err
-	}
+	switch bag.ResourceTypeID() {
+	case domainResourceType:
+		// list and paginate through all domains
+		domains, nextDomainsCursor, err := r.client.ListDomains(ctx, bag.PageToken())
+		if err != nil {
+			return nil, "", nil, err
+		}
 
-	// get role name
-	roleName, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_name")
-	if !ok {
-		return nil, "", nil, fmt.Errorf("unable to get role name from role trait profile")
-	}
+		// remove old cursors from bag
+		bag.Pop()
 
-	groups, domainsCursor, groupsCursors, err := r.client.ListGroupsWithRole(ctx, resource.Id.Resource, bag.PageToken())
-	if err != nil {
-		return nil, "", nil, err
-	}
-
-	// remove old cursors from bag
-	bag.Pop()
-
-	// first add cursor to look through next domains
-	if domainsCursor != "" {
-		bag.Push(
-			pagination.PageState{
-				ResourceTypeID: domainResourceType,
-				Token:          composeCursor(domainsCursor, ""),
-			},
-		)
-	}
-
-	// then add cursors to look through groups within domains
-	if len(groupsCursors) != 0 {
-		for _, gc := range groupsCursors {
+		// push next cursor for paginating domains
+		if nextDomainsCursor != "" {
 			bag.Push(
 				pagination.PageState{
-					ResourceTypeID: groupResourceType.Id,
-					Token:          composeCursor("", gc),
+					ResourceTypeID: domainResourceType,
+					Token:          nextDomainsCursor,
 				},
 			)
 		}
-	}
 
-	var rv []*v2.Grant
-	for _, g := range groups {
-		for _, gr := range g {
-			if gr.Roles.TotalCount == 0 {
+		for _, d := range domains {
+			if d.Total == 0 {
+				continue
+			}
+
+			// push cursor for paginating groups under domain
+			bag.Push(
+				pagination.PageState{
+					ResourceTypeID: groupResourceType.Id,
+					Token:          fmt.Sprintf("%s:", d.ID),
+				},
+			)
+		}
+
+		next, err := bag.NextToken(bag.PageToken())
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		return nil, next, nil, nil
+
+	case groupResourceType.Id:
+		// list and paginate through groups under specific domain
+		parts := strings.Split(bag.PageToken(), ":")
+		if len(parts) != 2 {
+			return nil, "", nil, fmt.Errorf("invalid page token: %s (type: %s)", bag.PageToken(), bag.ResourceTypeID())
+		}
+
+		domainId := parts[0]
+		cursor := parts[1]
+
+		// get role trait
+		rolesTrait, err := rs.GetRoleTrait(resource)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		// get role name for entitlement id
+		roleName, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_name")
+		if !ok {
+			return nil, "", nil, fmt.Errorf("unable to get role name from role trait profile")
+		}
+
+		// list all groups within all domains with specific role
+		groups, nextGroupsCursor, err := r.client.ListGroupsWithRole(ctx, domainId, resource.Id.Resource, cursor)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		c, err := composeCursor(domainId, nextGroupsCursor)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		next, err := bag.NextToken(c)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		var rv []*v2.Grant
+		for _, g := range groups {
+			// skip groups without roles
+			if g.Roles.TotalCount == 0 {
 				continue
 			}
 
@@ -174,13 +214,21 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 				roleName,
 				&v2.ResourceId{
 					ResourceType: groupResourceType.Id,
-					Resource:     gr.ID,
+					Resource:     g.ID,
 				},
+				grant.WithAnnotation(
+					&v2.GrantExpandable{
+						EntitlementIds: []string{fmt.Sprintf("group:%s:%s", g.ID, groupMembership)},
+					},
+				),
 			))
 		}
-	}
 
-	return rv, bag.PageToken(), nil, nil
+		return rv, next, nil, nil
+
+	default:
+		return nil, "", nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
+	}
 }
 
 func newRoleBuilder(client *newrelic.Client) *roleBuilder {

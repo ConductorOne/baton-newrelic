@@ -15,6 +15,7 @@ var (
 	orgResourceType = &v2.ResourceType{
 		Id:          "org",
 		DisplayName: "Org",
+		Annotations: annotationsForUserResourceType(),
 	}
 	roleResourceType = &v2.ResourceType{
 		Id:          "role",
@@ -26,4 +27,5 @@ var (
 		DisplayName: "Group",
 		Traits:      []v2.ResourceType_Trait{v2.ResourceType_TRAIT_GROUP},
 	}
+	domainResourceType = "domain"
 )

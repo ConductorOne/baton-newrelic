@@ -33,6 +33,18 @@ func parsePageToken(i string, resourceID *v2.ResourceId) (*pagination.Bag, error
 	return b, nil
 }
 
-func composeCursor(domainC, groupC string) string {
-	return fmt.Sprintf("%s-%s", domainC, groupC)
+func composeCursor(domainId, groupC string) (string, error) {
+	if domainId == "" && groupC == "" {
+		return "", fmt.Errorf("domainId and groupCursor cannot both be empty")
+	}
+
+	if domainId == "" {
+		return "", fmt.Errorf("domainId cannot be empty")
+	}
+
+	if groupC == "" {
+		return "", nil
+	}
+
+	return fmt.Sprintf("%s:%s", domainId, groupC), nil
 }

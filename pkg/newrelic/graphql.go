@@ -9,7 +9,7 @@ const (
 	actorBaseQ = "actor { %s }"
 
 	usersQuery = `users {
-		userSearch(cursor: $cursor) { 
+		userSearch(cursor: $userCursor) { 
 			nextCursor 
 			totalCount 
 			users { 
@@ -27,12 +27,13 @@ const (
 
 	rolesQuery = `organization {
 		authorizationManagement {
-			roles(cursor: $cursor) {
+			roles(cursor: $roleCursor) {
 				nextCursor
 				totalCount
 				roles {
-					displayName
 					id
+					displayName
+					name
 					scope
 				}
 			}
@@ -41,7 +42,29 @@ const (
 
 	groupsQuery = `organization {
 		authorizationManagement {
-			authenticationDomains(cursor: $domainCursor) {
+			authenticationDomains(id: $domainId) {
+				authenticationDomains {
+					id
+					name
+					groups(cursor: $groupCursor) {
+						nextCursor
+						totalCount
+						groups {
+							id
+							displayName
+							roles {
+								totalCount
+							}
+						}
+					}
+				}
+			}
+		}
+	}`
+
+	groupRolesQuery = `organization {
+		authorizationManagement {
+			authenticationDomains(id: $domainId) {
 				nextCursor
 				totalCount
 				authenticationDomains {
@@ -69,20 +92,36 @@ const (
 		}
 	}`
 
+	domainsQuery = `organization {
+		authorizationManagement {
+			authenticationDomains(cursor: $cursor) {
+				nextCursor
+				totalCount
+				authenticationDomains {
+					id
+					name
+					groups {
+						totalCount
+					}
+				}
+			}
+		}
+	}`
+
 	groupMembersQuery = `organization {
 		userManagement {
-		  authenticationDomains(cursor: $domainCursor) {
+		  authenticationDomains(id: $domainId) {
 			authenticationDomains {
 			  groups(id: $groupId) {
 				groups {
 				  id
 				  displayName
-				  users {
+				  users(cursor: $membersCursor) {
+					nextCursor
 					totalCount
 					users {
 					  id
 					}
-					nextCursor
 				  }
 				}
 				nextCursor
@@ -99,12 +138,14 @@ var (
 	OrgQ          = fmt.Sprintf(actorBaseQ, orgQuery)
 	RolesQ        = fmt.Sprintf(actorBaseQ, rolesQuery)
 	GroupsQ       = fmt.Sprintf(actorBaseQ, groupsQuery)
+	GroupRolesQ   = fmt.Sprintf(actorBaseQ, groupRolesQuery)
+	DomainsQ      = fmt.Sprintf(actorBaseQ, domainsQuery)
 	GroupMembersQ = fmt.Sprintf(actorBaseQ, groupMembersQuery)
 )
 
 func composeUsersQuery() string {
 	return fmt.Sprintf(
-		`query ListUsers($cursor: String) {
+		`query ListUsers($userCursor: String) {
 			%s
 			%s
 		}`, baseQ, UsersQ)
@@ -112,7 +153,7 @@ func composeUsersQuery() string {
 
 func composeOrgQuery() string {
 	return fmt.Sprintf(
-		`query GetOrg{
+		`query GetOrg {
 			%s
 			%s
 		}`, baseQ, OrgQ)
@@ -120,23 +161,39 @@ func composeOrgQuery() string {
 
 func composeRolesQuery() string {
 	return fmt.Sprintf(
-		`query ListRoles($cursor: String) {
+		`query ListRoles($roleCursor: String) {
 			%s
 			%s
 		}`, baseQ, RolesQ)
 }
 
+func composeDomainsQuery() string {
+	return fmt.Sprintf(
+		`query ListDomains($cursor: String) {
+			%s
+			%s
+		}`, baseQ, DomainsQ)
+}
+
 func composeGroupsQuery() string {
 	return fmt.Sprintf(
-		`query ListGroups($roleId: [ID!], $domainCursor: String, $groupCursor: String) {
+		`query ListGroups($domainId: [ID!], $groupCursor: String) {
 			%s
 			%s
 		}`, baseQ, GroupsQ)
 }
 
+func composeAllGroupsWithRoleQuery() string {
+	return fmt.Sprintf(
+		`query ListGroups($domainId: [ID!], $roleId: [ID!], $groupCursor: String) {
+			%s
+			%s
+		}`, baseQ, GroupRolesQ)
+}
+
 func composeGroupMembersQuery() string {
 	return fmt.Sprintf(
-		`query ListGroupMembers($groupId: [ID!], $domainCursor: String) {
+		`query ListGroupMembers($domainId: [ID!], $groupId: [ID!], $membersCursor: String) {
 			%s
 			%s
 		}`, baseQ, GroupMembersQ)
@@ -150,7 +207,7 @@ type QueryResponse[T any] struct {
 
 type ListBase struct {
 	NextCursor string `json:"nextCursor"`
-	Total      int    `json:"total"`
+	Total      int    `json:"totalCount"`
 }
 
 type UsersResponse = QueryResponse[struct {
@@ -178,6 +235,8 @@ type OrgAuthManagementResponse[T any] OrgResponse[struct {
 }]
 
 type GroupsResponse = OrgAuthManagementResponse[struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
 	Groups struct {
 		ListBase
 		Groups []Group `json:"groups"`
@@ -189,7 +248,7 @@ type RolesResponse = OrgResponse[struct {
 		Roles struct {
 			ListBase
 			Roles []Role `json:"roles"`
-		}
+		} `json:"roles"`
 	} `json:"authorizationManagement"`
 }]
 

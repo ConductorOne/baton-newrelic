@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -10,7 +11,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
-	"github.com/conductorone/baton-sdk/pkg/types/resource"
+	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
 const (
@@ -26,13 +27,19 @@ func (g *groupBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return groupResourceType
 }
 
-func groupResource(ctx context.Context, parentId *v2.ResourceId, group *newrelic.Group) (*v2.Resource, error) {
-	resource, err := resource.NewGroupResource(
+func groupResource(ctx context.Context, parentId *v2.ResourceId, domainId string, group *newrelic.Group) (*v2.Resource, error) {
+	profile := map[string]interface{}{
+		"group_domain": domainId,
+	}
+
+	resource, err := rs.NewGroupResource(
 		group.Name,
 		groupResourceType,
 		group.ID,
-		nil,
-		resource.WithParentResourceID(parentId),
+		[]rs.GroupTraitOption{
+			rs.WithGroupProfile(profile),
+		},
+		rs.WithParentResourceID(parentId),
 	)
 
 	if err != nil {
@@ -41,8 +48,6 @@ func groupResource(ctx context.Context, parentId *v2.ResourceId, group *newrelic
 
 	return resource, nil
 }
-
-var domainResourceType = "domain"
 
 // List returns all the groups from the database as resource objects.
 // Groups include a GroupTrait because they are the 'shape' of a standard group.
@@ -57,63 +62,92 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 		return nil, "", nil, err
 	}
 
-	// TODO: test this properly
-	// flow of this function is:
-	// 1. query all domains and groups within those domains
-	// 2. obtain cursors for paginating over them
-	// 3. paginate through domains
-	//   3.1. paginate through groups within domain
-	//   3.2. append new page tokens to bag (or return) to be used in next iteration
-	//   3.3. return resources, groups, and cursor for next groups call
-	// 4. at the end of iterating groups within domains, return resources, groups, and cursor for next domains call
+	switch bag.ResourceTypeID() {
+	case domainResourceType:
+		// list and paginate through domains
+		domains, nextDomainsCursor, err := g.client.ListDomains(ctx, bag.PageToken())
+		if err != nil {
+			return nil, "", nil, err
+		}
 
-	// take in consideration that this function is the only that will handle both domains and groups
-	// so we need to know if we are iterating over domains or groups
-	// we obtained token to iterate over domains
-	// we need to query all domains and groups within those domains
-	groups, domainsCursor, groupsCursors, err := g.client.ListGroups(ctx, bag.PageToken())
-	if err != nil {
-		return nil, "", nil, err
-	}
+		// remove old cursors from bag
+		bag.Pop()
 
-	// first push the cursor for next domains
-	bag.Pop()
-
-	if domainsCursor != "" {
-		bag.Push(
-			pagination.PageState{
-				ResourceTypeID: domainResourceType,
-				Token:          composeCursor(domainsCursor, ""),
-			},
-		)
-	}
-
-	// then push cursors for paginating groups within domains
-	if len(groupsCursors) != 0 {
-		for _, gc := range groupsCursors {
+		// add cursor for next domains to bag
+		if nextDomainsCursor != "" {
 			bag.Push(
 				pagination.PageState{
-					ResourceTypeID: groupResourceType.Id,
-					Token:          composeCursor("", gc),
+					ResourceTypeID: domainResourceType,
+					Token:          nextDomainsCursor,
 				},
 			)
 		}
-	}
 
-	var rv []*v2.Resource
-	for _, g := range groups {
-		for _, group := range g {
-			groupCopy := group
-			gr, err := groupResource(ctx, parentResourceID, &groupCopy)
+		for _, d := range domains {
+			if d.Total == 0 {
+				continue
+			}
+
+			// add cursors for paginating groups under this domain
+			bag.Push(
+				pagination.PageState{
+					ResourceTypeID: groupResourceType.Id,
+					Token:          fmt.Sprintf("%s:", d.ID),
+				},
+			)
+		}
+
+		// handle next iteration
+		next, err := bag.NextToken(bag.PageToken())
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		return nil, next, nil, nil
+
+	case groupResourceType.Id:
+		// list and paginate through groups within a domain
+		parts := strings.Split(bag.PageToken(), ":")
+		if len(parts) != 2 {
+			return nil, "", nil, fmt.Errorf("invalid page token: %s (type: %s)", bag.PageToken(), bag.ResourceTypeID())
+		}
+
+		domainId := parts[0]
+		cursor := parts[1]
+
+		// list all groups within all domains with specific role
+		groups, nextGroupsCursor, err := g.client.ListGroups(ctx, domainId, cursor)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		c, err := composeCursor(domainId, nextGroupsCursor)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		next, err := bag.NextToken(c)
+		if err != nil {
+			return nil, "", nil, err
+		}
+
+		var rv []*v2.Resource
+		for _, g := range groups {
+			groupCopy := g
+
+			gr, err := groupResource(ctx, parentResourceID, domainId, &groupCopy)
 			if err != nil {
 				return nil, "", nil, err
 			}
 
 			rv = append(rv, gr)
 		}
-	}
 
-	return rv, bag.PageToken(), nil, nil
+		return rv, next, nil, nil
+
+	default:
+		return nil, "", nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
+	}
 }
 
 // Entitlements always returns an empty slice for groups.
@@ -133,12 +167,23 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 
 // Grants always returns an empty slice for groups since they don't have any entitlements.
 func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: domainResourceType})
+	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
 		return nil, "", nil, err
 	}
 
-	members, nextDomainsCursor, err := g.client.ListGroupMembers(ctx, resource.Id.Resource, bag.PageToken())
+	// obtain domain id from group profile
+	groupTrait, err := rs.GetGroupTrait(resource)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	domainId, ok := rs.GetProfileStringValue(groupTrait.Profile, "group_domain")
+	if !ok {
+		return nil, "", nil, fmt.Errorf("unable to get domain id from group trait profile")
+	}
+
+	members, nextDomainsCursor, err := g.client.ListGroupMembers(ctx, domainId, resource.Id.Resource, bag.PageToken())
 	if err != nil {
 		return nil, "", nil, err
 	}
