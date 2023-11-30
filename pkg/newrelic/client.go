@@ -34,6 +34,7 @@ func NewClient(httpClient *http.Client, apikey string) *Client {
 	}
 }
 
+// ListUsers return users across whole organization.
 func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, error) {
 	var res UsersResponse
 	variables := map[string]interface{}{}
@@ -57,6 +58,7 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 		nil
 }
 
+// GetOrg returns organization details.
 func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	var res OrgDetailResponse
 
@@ -68,6 +70,7 @@ func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	return &res.Data.Actor.Organization, nil
 }
 
+// ListRoles returns roles across whole organization.
 func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, error) {
 	var res RolesResponse
 	variables := map[string]interface{}{}
@@ -91,7 +94,7 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		nil
 }
 
-// ListGroupsWithRole returns groups with specified role under also specified domain.
+// ListGroupsWithRole returns groups with specified role under specified domain.
 func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, cursor string) ([]Group, string, error) {
 	var res GroupsResponse
 	variables := map[string]interface{}{
@@ -129,7 +132,7 @@ func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, curso
 	return groups, domains.NextCursor, nil
 }
 
-// ListDomains returns all authentication domains.
+// ListDomains returns all authentication domains across organization.
 func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, string, error) {
 	var res OrgAuthManagementResponse[struct {
 		ID     string `json:"id"`
@@ -210,15 +213,16 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 	return groups, domains.NextCursor, nil
 }
 
-func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, membersCursor string) ([]string, string, error) {
+// ListGroupMembers returns users under specific group.
+func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor string) ([]string, string, error) {
 	var res GroupMembersResponse
 	variables := map[string]interface{}{
 		"domainId": domainId,
 		"groupId":  groupId,
 	}
 
-	if membersCursor != "" {
-		variables["membersCursor"] = membersCursor
+	if cursor != "" {
+		variables["membersCursor"] = cursor
 	}
 
 	err := c.Query(
@@ -231,10 +235,24 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, member
 		return nil, "", err
 	}
 
-	var users []string
-
 	domains := res.Data.Actor.Organization.Management.Domains
-	domainsCursor := domains.NextCursor
+	if len(domains.Domains) == 0 {
+		return nil, "", fmt.Errorf("domain not found: %s", domainId)
+	}
+
+	if len(domains.Domains) > 1 {
+		return nil, "", fmt.Errorf("invalid id(%s) or cursor(%s), found more domains", domainId, cursor)
+	}
+
+	if len(domains.Domains[0].Groups.Groups) == 0 {
+		return nil, "", fmt.Errorf("group not found: %s", groupId)
+	}
+
+	if len(domains.Domains[0].Groups.Groups) > 1 {
+		return nil, "", fmt.Errorf("invalid id(%s) or cursor(%s), found more groups", groupId, cursor)
+	}
+
+	var users []string
 
 	// loop through domains if there is group with the same id
 	for _, d := range domains.Domains {
@@ -245,7 +263,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, member
 		}
 	}
 
-	return users, domainsCursor, nil
+	return users, domains.Domains[0].Groups.Groups[0].Users.NextCursor, nil
 }
 
 type GraphqlBody struct {

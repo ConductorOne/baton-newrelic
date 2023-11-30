@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
@@ -43,6 +44,11 @@ func (nr *NewRelic) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 // Validate is called to ensure that the connector is properly configured. It should exercise any API credentials
 // to be sure that they are valid.
 func (nr *NewRelic) Validate(ctx context.Context) (annotations.Annotations, error) {
+	_, err := nr.client.GetOrg(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to retrieve org: %w", err)
+	}
+
 	return nil, nil
 }
 

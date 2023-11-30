@@ -73,7 +73,7 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 		// remove old cursors from bag
 		bag.Pop()
 
-		// add cursor for next domains to bag
+		// add cursor for paginating next domains to bag
 		if nextDomainsCursor != "" {
 			bag.Push(
 				pagination.PageState{
@@ -97,10 +97,18 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 			)
 		}
 
+		// if there are no more cursors, return nil
+		var token string
+		if bag.Current() != nil {
+			token = bag.PageToken()
+		}
+
 		// handle next iteration
-		next, err := bag.NextToken(bag.PageToken())
+		next, err := bag.NextToken(token)
 		if err != nil {
-			return nil, "", nil, err
+			if err.Error() != "no active page state" {
+				return nil, "", nil, err
+			}
 		}
 
 		return nil, next, nil, nil

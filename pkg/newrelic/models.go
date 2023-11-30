@@ -1,7 +1,5 @@
 package newrelic
 
-// TODO: add more comments
-
 type BaseResource struct {
 	ID string `json:"id"`
 }
@@ -17,6 +15,7 @@ type Org struct {
 	Name string `json:"name"`
 }
 
+// authentication domain (see more here: https://docs.newrelic.com/docs/accounts/accounts-billing/new-relic-one-user-management/authentication-domains-saml-sso-scim-more)
 type Domain struct {
 	ID         string  `json:"id"`
 	Name       string  `json:"name"`

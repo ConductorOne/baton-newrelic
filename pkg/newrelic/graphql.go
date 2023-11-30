@@ -2,8 +2,6 @@ package newrelic
 
 import "fmt"
 
-// TODO: add more comments
-
 const (
 	baseQ      = "requestContext { userId }"
 	actorBaseQ = "actor { %s }"
@@ -20,127 +18,117 @@ const (
 		}
 	 }`
 
-	orgQuery = `organization {
+	orgQuery = `organization { %s }`
+
+	managementQuery = `organization { authorizationManagement { %s } }`
+
+	orgDetailQuery = `organization { 
 		id
 		name
 	}`
 
-	rolesQuery = `organization {
-		authorizationManagement {
-			roles(cursor: $roleCursor) {
+	rolesQuery = `roles(cursor: $roleCursor) {
+		nextCursor
+		totalCount
+		roles {
+			id
+			displayName
+			name
+			scope
+		}
+	}`
+
+	groupsQuery = `authenticationDomains(id: $domainId) {
+		authenticationDomains {
+			id
+			name
+			groups(cursor: $groupCursor) {
 				nextCursor
 				totalCount
-				roles {
+				groups {
 					id
 					displayName
-					name
-					scope
-				}
-			}
-		}
-	}`
-
-	groupsQuery = `organization {
-		authorizationManagement {
-			authenticationDomains(id: $domainId) {
-				authenticationDomains {
-					id
-					name
-					groups(cursor: $groupCursor) {
-						nextCursor
+					roles {
 						totalCount
-						groups {
-							id
-							displayName
-							roles {
-								totalCount
-							}
-						}
 					}
 				}
 			}
 		}
 	}`
 
-	groupRolesQuery = `organization {
-		authorizationManagement {
-			authenticationDomains(id: $domainId) {
+	groupRolesQuery = `authenticationDomains(id: $domainId) {
+		nextCursor
+		totalCount
+		authenticationDomains {
+			id
+			name
+			groups(cursor: $groupCursor) {
 				nextCursor
 				totalCount
-				authenticationDomains {
-					id
-					name
-					groups(cursor: $groupCursor) {
-						nextCursor
-						totalCount
-						groups {
-							id
-							displayName
-							roles(roleId: $roleId) {
-								nextCursor
-								totalCount
-								roles {
-									id
-									name
-									displayName
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}`
-
-	domainsQuery = `organization {
-		authorizationManagement {
-			authenticationDomains(cursor: $cursor) {
-				nextCursor
-				totalCount
-				authenticationDomains {
-					id
-					name
-					groups {
-						totalCount
-					}
-				}
-			}
-		}
-	}`
-
-	groupMembersQuery = `organization {
-		userManagement {
-		  authenticationDomains(id: $domainId) {
-			authenticationDomains {
-			  groups(id: $groupId) {
 				groups {
-				  id
-				  displayName
-				  users(cursor: $membersCursor) {
+					id
+					displayName
+					roles(roleId: $roleId) {
+						nextCursor
+						totalCount
+						roles {
+							id
+							name
+							displayName
+						}
+					}
+				}
+			}
+		}
+	}`
+
+	domainsQuery = `authenticationDomains(cursor: $cursor) {
+		nextCursor
+		totalCount
+		authenticationDomains {
+			id
+			name
+			groups {
+				totalCount
+			}
+		}
+	}`
+
+	groupMembersQuery = `userManagement {
+		authenticationDomains(id: $domainId) {
+			authenticationDomains {
+				groups(id: $groupId) {
 					nextCursor
 					totalCount
-					users {
-					  id
+					groups {
+						id
+						displayName
+						users(cursor: $membersCursor) {
+							nextCursor
+							totalCount
+							users {
+								id
+							}
+						}
 					}
-				  }
 				}
-				nextCursor
-				totalCount
-			  }
 			}
-		  }
 		}
-	  }`
+	}`
 )
 
 var (
-	UsersQ        = fmt.Sprintf(actorBaseQ, usersQuery)
-	OrgQ          = fmt.Sprintf(actorBaseQ, orgQuery)
-	RolesQ        = fmt.Sprintf(actorBaseQ, rolesQuery)
-	GroupsQ       = fmt.Sprintf(actorBaseQ, groupsQuery)
-	GroupRolesQ   = fmt.Sprintf(actorBaseQ, groupRolesQuery)
-	DomainsQ      = fmt.Sprintf(actorBaseQ, domainsQuery)
-	GroupMembersQ = fmt.Sprintf(actorBaseQ, groupMembersQuery)
+	ManagementsQ = fmt.Sprintf(actorBaseQ, managementQuery)
+	OrgQ         = fmt.Sprintf(actorBaseQ, orgQuery)
+
+	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
+	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
+
+	RolesQ        = fmt.Sprintf(ManagementsQ, rolesQuery)
+	GroupsQ       = fmt.Sprintf(ManagementsQ, groupsQuery)
+	GroupRolesQ   = fmt.Sprintf(ManagementsQ, groupRolesQuery)
+	DomainsQ      = fmt.Sprintf(ManagementsQ, domainsQuery)
+	GroupMembersQ = fmt.Sprintf(OrgQ, groupMembersQuery)
 )
 
 func composeUsersQuery() string {
@@ -156,7 +144,7 @@ func composeOrgQuery() string {
 		`query GetOrg {
 			%s
 			%s
-		}`, baseQ, OrgQ)
+		}`, baseQ, OrgDetailQ)
 }
 
 func composeRolesQuery() string {
@@ -267,6 +255,7 @@ type GroupMembersResponse = OrgUserManagementResponse[struct {
 			DisplayName string `json:"displayName"`
 			ID          string `json:"id"`
 			Users       struct {
+				ListBase
 				Users []struct {
 					ID string `json:"id"`
 				} `json:"users"`
