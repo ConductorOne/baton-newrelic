@@ -12,6 +12,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 const (
@@ -229,6 +231,53 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 	default:
 		return nil, "", nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
 	}
+}
+
+func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	if principal.Id.ResourceType != groupResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only groups can be granted role membership",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only groups can be granted role membership")
+	}
+
+	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	err := r.client.AddRoleToGroup(ctx, roleId, groupId)
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to add role to group: %w", err)
+	}
+
+	return nil, nil
+}
+
+func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	principal := grant.Principal
+	entitlement := grant.Entitlement
+
+	if principal.Id.ResourceType != groupResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only groups can have role membership revoked",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only groups can have role membership revoked")
+	}
+
+	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	err := r.client.RemoveRoleFromGroup(ctx, roleId, groupId)
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to remove role from group: %w", err)
+	}
+
+	return nil, nil
 }
 
 func newRoleBuilder(client *newrelic.Client) *roleBuilder {
