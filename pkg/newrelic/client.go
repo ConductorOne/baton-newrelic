@@ -266,6 +266,86 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 	return users, domains.Domains[0].Groups.Groups[0].Users.NextCursor, nil
 }
 
+func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) error {
+	var res AddGroupMemberResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"userId":  userId,
+	}
+
+	err := c.Mutate(
+		ctx,
+		composeAddGroupMemberMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string) error {
+	var res RemoveGroupMemberResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"userId":  userId,
+	}
+
+	err := c.Mutate(
+		ctx,
+		composeRemoveGroupMemberMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) AddRoleToGroup(ctx context.Context, roleId, groupId string) error {
+	var res AddGroupRoleResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"roleId":  roleId,
+	}
+
+	err := c.Mutate(
+		ctx,
+		composeAddGroupRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveRoleFromGroup(ctx context.Context, groupId, roleId string) error {
+	var res RemoveGroupRoleResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"roleId":  roleId,
+	}
+
+	err := c.Mutate(
+		ctx,
+		composeRemoveGroupRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 type GraphqlBody struct {
 	Query     string                 `json:"query"`
 	Variables map[string]interface{} `json:"variables"`
@@ -280,9 +360,23 @@ func (c *Client) Query(ctx context.Context, query string, variables map[string]i
 
 	vars["userId"] = c.apikey
 
+	return c.doRequest(ctx, query, vars, res)
+}
+
+func (c *Client) Mutate(ctx context.Context, query string, variables map[string]interface{}, res interface{}) error {
+	vars := make(map[string]interface{}, len(variables)+1)
+
+	for k, v := range variables {
+		vars[k] = v
+	}
+
+	return c.doRequest(ctx, query, vars, res)
+}
+
+func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
 	body := &GraphqlBody{
-		Query:     query,
-		Variables: vars,
+		Query:     q,
+		Variables: v,
 	}
 
 	reqBody, err := json.Marshal(body)

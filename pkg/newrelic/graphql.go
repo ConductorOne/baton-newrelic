@@ -115,6 +115,58 @@ const (
 			}
 		}
 	}`
+
+	addGroupMemberMutation = `userManagementAddUsersToGroups(
+		addUsersToGroupsOptions: {
+		  groupIds: [$groupId]
+		  userIds: [$userId]
+		}
+	  ) {
+		groups {
+		  displayName
+		  id
+		}
+	  }`
+
+	removeGroupMemberMutation = `userManagementRemoveUsersFromGroups(
+		removeUsersFromGroupsOptions: {
+			groupIds: [$groupId]
+			userIds: [$userId]
+		  }
+		) {
+		  groups {
+			displayName
+			id
+		  }
+		}`
+
+	addGroupRoleMutation = `authorizationManagementGrantAccess(
+		grantAccessOptions: {
+		  groupId: $groupId
+		  groupAccessGrants: {
+			  groupId: $groupId
+			  roleId: $roleId
+		  }
+		}) {
+			roles {
+				displayName
+				roleId
+			}
+		}`
+
+	removeGroupRoleMutation = `authorizationManagementRevokeAccess(
+		revokeAccessOptions: {
+			groupId: $groupId
+			groupAccessGrants: {
+				groupId: $groupId
+				roleId: $roleId
+			}
+		}) {
+			roles {
+				displayName
+				roleId
+			}
+		}`
 )
 
 var (
@@ -185,6 +237,34 @@ func composeGroupMembersQuery() string {
 			%s
 			%s
 		}`, baseQ, GroupMembersQ)
+}
+
+func composeAddGroupMemberMutation() string {
+	return fmt.Sprintf(
+		`mutation AddGroupMember($groupId: ID!, $userId: ID!) {
+			%s
+		}`, addGroupMemberMutation)
+}
+
+func composeRemoveGroupMemberMutation() string {
+	return fmt.Sprintf(
+		`mutation RemoveGroupMember($groupId: ID!, $userId: ID!) {
+			%s
+		}`, removeGroupMemberMutation)
+}
+
+func composeAddGroupRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation AddGroupRole($groupId: ID!, $roleId: ID!) {
+			%s
+		}`, addGroupRoleMutation)
+}
+
+func composeRemoveGroupRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation RemoveGroupRole($groupId: ID!, $roleId: ID!) {
+			%s
+		}`, removeGroupRoleMutation)
 }
 
 type QueryResponse[T any] struct {
@@ -263,3 +343,47 @@ type GroupMembersResponse = OrgUserManagementResponse[struct {
 		} `json:"groups"`
 	} `json:"groups"`
 }]
+
+type AddGroupMemberResponse struct {
+	Data struct {
+		MutData struct {
+			Groups []struct {
+				DisplayName string `json:"displayName"`
+				ID          string `json:"id"`
+			} `json:"groups"`
+		} `json:"userManagementAddUsersToGroups"`
+	} `json:"data"`
+}
+
+type RemoveGroupMemberResponse struct {
+	Data struct {
+		MutData struct {
+			Groups []struct {
+				DisplayName string `json:"displayName"`
+				ID          string `json:"id"`
+			} `json:"groups"`
+		} `json:"userManagementRemoveUsersFromGroups"`
+	} `json:"data"`
+}
+
+type AddGroupRoleResponse struct {
+	Data struct {
+		MutData struct {
+			Roles []struct {
+				DisplayName string `json:"displayName"`
+				ID          string `json:"id"`
+			} `json:"roles"`
+		} `json:"authorizationManagementGrantAccess"`
+	} `json:"data"`
+}
+
+type RemoveGroupRoleResponse struct {
+	Data struct {
+		MutData struct {
+			Roles []struct {
+				DisplayName string `json:"displayName"`
+				ID          string `json:"id"`
+			} `json:"roles"`
+		} `json:"authorizationManagementRevokeAccess"`
+	} `json:"data"`
+}
