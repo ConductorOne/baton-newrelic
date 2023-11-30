@@ -8,7 +8,11 @@ Check out [Baton](https://github.com/conductorone/baton) to learn more about the
 
 # Prerequisites
 
-To use the connector, you will need a NewRelic account with the admin permissions (like default All Product Admin) and a NewRelic API key. You can create a new API key by logging into account and clicking on the profile tab in the left bottom corner. Then click on the API keys tab and create a new key.
+To use the connector, you will need a NewRelic account with the admin permissions (like default Admin group) and a NewRelic API key. 
+
+Authentication domain settings under Administration settings when configuring group permissions must be enabled for the API key to work.
+
+You can create a new API key by logging into account and clicking on the profile tab in the left bottom corner. Then click on the API keys tab and create a new key.
 
 # Getting Started
 
