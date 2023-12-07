@@ -123,38 +123,39 @@ const (
 
 	addGroupMemberMutation = `userManagementAddUsersToGroups(
 		addUsersToGroupsOptions: {
-		  groupIds: [$groupId]
-		  userIds: [$userId]
+			groupIds: [$groupId]
+			userIds: [$userId]
 		}
-	  ) {
+	) {
 		groups {
-		  displayName
-		  id
+			displayName
+			id
 		}
-	  }`
+	}`
 
 	removeGroupMemberMutation = `userManagementRemoveUsersFromGroups(
 		removeUsersFromGroupsOptions: {
 			groupIds: [$groupId]
 			userIds: [$userId]
-		  }
-		) {
-		  groups {
+		}
+	) {
+		groups {
 			displayName
 			id
-		  }
-		}`
+		}
+	}`
 
 	addRoleMutation = `authorizationManagementGrantAccess(
 		grantAccessOptions: {
 			groupId: $groupId 
 		 	%s
-		}) {
-			roles {
-				displayName
-				roleId
-			}
-		}`
+		}
+	) {
+		roles {
+			displayName
+			roleId
+		}
+	}`
 
 	groupAccessGrants = `groupAccessGrants: {
 		groupId: $groupId
@@ -174,12 +175,13 @@ const (
 		revokeAccessOptions: {
 			groupId: $groupId
 			%s
-		}) {
-			roles {
-				displayName
-				roleId
-			}
-		}`
+		}
+	) {
+		roles {
+			displayName
+			roleId
+		}
+	}`
 )
 
 var (
