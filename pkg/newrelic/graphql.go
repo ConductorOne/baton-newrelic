@@ -18,6 +18,10 @@ const (
 		}
 	 }`
 
+	accountsQuery = `accounts {
+		id
+	}`
+
 	orgQuery = `organization { %s }`
 
 	managementQuery = `organization { authorizationManagement { %s } }`
@@ -140,13 +144,10 @@ const (
 		  }
 		}`
 
-	addGroupRoleMutation = `authorizationManagementGrantAccess(
+	addRoleMutation = `authorizationManagementGrantAccess(
 		grantAccessOptions: {
-		  groupId: $groupId
-		  groupAccessGrants: {
-			  groupId: $groupId
-			  roleId: $roleId
-		  }
+			groupId: $groupId 
+		 	%s
 		}) {
 			roles {
 				displayName
@@ -154,13 +155,24 @@ const (
 			}
 		}`
 
-	removeGroupRoleMutation = `authorizationManagementRevokeAccess(
+	groupAccessGrants = `groupAccessGrants: {
+		groupId: $groupId
+		roleId: $roleId
+	}`
+
+	accountAccessGrants = `accountAccessGrants: {
+		accountId: $accountId
+		roleId: $roleId
+	}`
+
+	orgAccessGrants = `organizationAccessGrants: {
+		roleId: $roleId
+	}`
+
+	removeRoleMutation = `authorizationManagementRevokeAccess(
 		revokeAccessOptions: {
 			groupId: $groupId
-			groupAccessGrants: {
-				groupId: $groupId
-				roleId: $roleId
-			}
+			%s
 		}) {
 			roles {
 				displayName
@@ -172,6 +184,7 @@ const (
 var (
 	ManagementsQ = fmt.Sprintf(actorBaseQ, managementQuery)
 	OrgQ         = fmt.Sprintf(actorBaseQ, orgQuery)
+	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
 	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
@@ -181,7 +194,23 @@ var (
 	GroupRolesQ   = fmt.Sprintf(ManagementsQ, groupRolesQuery)
 	DomainsQ      = fmt.Sprintf(ManagementsQ, domainsQuery)
 	GroupMembersQ = fmt.Sprintf(OrgQ, groupMembersQuery)
+
+	AddGroupRole   = fmt.Sprintf(addRoleMutation, groupAccessGrants)
+	AddAccountRole = fmt.Sprintf(addRoleMutation, accountAccessGrants)
+	AddOrgRole     = fmt.Sprintf(addRoleMutation, orgAccessGrants)
+
+	RemoveGroupRole   = fmt.Sprintf(removeRoleMutation, groupAccessGrants)
+	RemoveAccountRole = fmt.Sprintf(removeRoleMutation, accountAccessGrants)
+	RemoveOrgRole     = fmt.Sprintf(removeRoleMutation, orgAccessGrants)
 )
+
+func composeAccountsQuery() string {
+	return fmt.Sprintf(
+		`query ListAccounts {
+			%s
+			%s
+		}`, baseQ, AccountsQ)
+}
 
 func composeUsersQuery() string {
 	return fmt.Sprintf(
@@ -257,21 +286,62 @@ func composeAddGroupRoleMutation() string {
 	return fmt.Sprintf(
 		`mutation AddGroupRole($groupId: ID!, $roleId: ID!) {
 			%s
-		}`, addGroupRoleMutation)
+		}`, AddGroupRole)
+}
+
+func composeAddAccountRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation AddAccountRole($accountId: Int!, $groupId: ID!, $roleId: ID!) {
+			%s
+		}`, AddAccountRole)
+}
+
+func composeAddOrgRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation AddOrgRole($groupId: ID!, $roleId: ID!) {
+			%s
+		}`, AddOrgRole)
 }
 
 func composeRemoveGroupRoleMutation() string {
 	return fmt.Sprintf(
 		`mutation RemoveGroupRole($groupId: ID!, $roleId: ID!) {
 			%s
-		}`, removeGroupRoleMutation)
+		}`, RemoveGroupRole)
 }
 
+func composeRemoveAccountRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation RemoveAccountRole($accountId: Int!, $groupId: ID!, $roleId: ID!) {
+			%s
+		}`, RemoveAccountRole)
+}
+
+func composeRemoveOrgRoleMutation() string {
+	return fmt.Sprintf(
+		`mutation RemoveOrgRole($groupId: ID!, $roleId: ID!) {
+			%s
+		}`, RemoveOrgRole)
+}
+
+// request body structure for graphql queries and mutations
+type GraphqlBody struct {
+	Query     string                 `json:"query"`
+	Variables map[string]interface{} `json:"variables"`
+}
+
+// response structures of graphql queries and mutations
 type QueryResponse[T any] struct {
 	Data struct {
 		Actor T `json:"actor"`
 	} `json:"data"`
 }
+
+type AccountsResponse = QueryResponse[struct {
+	Accounts []struct {
+		ID int `json:"id"`
+	} `json:"accounts"`
+}]
 
 type ListBase struct {
 	NextCursor string `json:"nextCursor"`
@@ -366,23 +436,23 @@ type RemoveGroupMemberResponse struct {
 	} `json:"data"`
 }
 
-type AddGroupRoleResponse struct {
+type GrantRoleResponse struct {
 	Data struct {
 		MutData struct {
 			Roles []struct {
 				DisplayName string `json:"displayName"`
-				ID          string `json:"id"`
+				ID          int    `json:"roleId"`
 			} `json:"roles"`
 		} `json:"authorizationManagementGrantAccess"`
 	} `json:"data"`
 }
 
-type RemoveGroupRoleResponse struct {
+type RevokeRoleResponse struct {
 	Data struct {
 		MutData struct {
 			Roles []struct {
 				DisplayName string `json:"displayName"`
-				ID          string `json:"id"`
+				ID          int    `json:"roleId"`
 			} `json:"roles"`
 		} `json:"authorizationManagementRevokeAccess"`
 	} `json:"data"`
