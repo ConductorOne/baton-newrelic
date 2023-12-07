@@ -2,6 +2,7 @@ package newrelic
 
 import "fmt"
 
+// GraphQL queries and mutations.
 const (
 	baseQ      = "requestContext { userId }"
 	actorBaseQ = "actor { %s }"
@@ -324,13 +325,13 @@ func composeRemoveOrgRoleMutation() string {
 		}`, RemoveOrgRole)
 }
 
-// request body structure for graphql queries and mutations
+// Request body structure for graphql queries and mutations.
 type GraphqlBody struct {
 	Query     string                 `json:"query"`
 	Variables map[string]interface{} `json:"variables"`
 }
 
-// response structures of graphql queries and mutations
+// Response structures of graphql queries and mutations.
 type QueryResponse[T any] struct {
 	Data struct {
 		Actor T `json:"actor"`
