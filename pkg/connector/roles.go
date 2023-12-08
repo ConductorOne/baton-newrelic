@@ -106,7 +106,7 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 	permissionOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(groupResourceType),
 		ent.WithDisplayName(fmt.Sprintf("%s Role", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("%s access to %s group in DockerHub", roleMembership, resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("%s access to %s group in NewRelic", roleMembership, resource.DisplayName)),
 	}
 
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, roleName, permissionOptions...))

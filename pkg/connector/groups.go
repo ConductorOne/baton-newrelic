@@ -165,7 +165,7 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 	permissionOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(userResourceType),
 		ent.WithDisplayName(fmt.Sprintf("%s Group %s", resource.DisplayName, groupMembership)),
-		ent.WithDescription(fmt.Sprintf("%s access to %s group in DockerHub", groupMembership, resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("%s access to %s group in NewRelic", groupMembership, resource.DisplayName)),
 	}
 
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, groupMembership, permissionOptions...))
