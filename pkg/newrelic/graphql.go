@@ -4,7 +4,6 @@ import "fmt"
 
 // GraphQL queries and mutations.
 const (
-	baseQ      = "requestContext { userId }"
 	actorBaseQ = "actor { %s }"
 
 	usersQuery = `users {
@@ -211,64 +210,56 @@ func composeAccountsQuery() string {
 	return fmt.Sprintf(
 		`query ListAccounts {
 			%s
-			%s
-		}`, baseQ, AccountsQ)
+		}`, AccountsQ)
 }
 
 func composeUsersQuery() string {
 	return fmt.Sprintf(
 		`query ListUsers($userCursor: String) {
 			%s
-			%s
-		}`, baseQ, UsersQ)
+		}`, UsersQ)
 }
 
 func composeOrgQuery() string {
 	return fmt.Sprintf(
 		`query GetOrg {
 			%s
-			%s
-		}`, baseQ, OrgDetailQ)
+		}`, OrgDetailQ)
 }
 
 func composeRolesQuery() string {
 	return fmt.Sprintf(
 		`query ListRoles($roleCursor: String) {
 			%s
-			%s
-		}`, baseQ, RolesQ)
+		}`, RolesQ)
 }
 
 func composeDomainsQuery() string {
 	return fmt.Sprintf(
 		`query ListDomains($cursor: String) {
 			%s
-			%s
-		}`, baseQ, DomainsQ)
+		}`, DomainsQ)
 }
 
 func composeGroupsQuery() string {
 	return fmt.Sprintf(
 		`query ListGroups($domainId: [ID!], $groupCursor: String) {
 			%s
-			%s
-		}`, baseQ, GroupsQ)
+		}`, GroupsQ)
 }
 
 func composeAllGroupsWithRoleQuery() string {
 	return fmt.Sprintf(
 		`query ListGroups($domainId: [ID!], $roleId: [ID!], $groupCursor: String) {
 			%s
-			%s
-		}`, baseQ, GroupRolesQ)
+		}`, GroupRolesQ)
 }
 
 func composeGroupMembersQuery() string {
 	return fmt.Sprintf(
 		`query ListGroupMembers($domainId: [ID!], $groupId: [ID!], $membersCursor: String) {
 			%s
-			%s
-		}`, baseQ, GroupMembersQ)
+		}`, GroupMembersQ)
 }
 
 func composeAddGroupMemberMutation() string {

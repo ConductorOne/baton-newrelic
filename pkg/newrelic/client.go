@@ -44,13 +44,9 @@ func NewClient(ctx context.Context, httpClient *http.Client, apikey string) (*Cl
 func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apikey string) (int, error) {
 	var res AccountsResponse
 	q := composeAccountsQuery()
-	v := map[string]interface{}{
-		"userId": apikey,
-	}
 
 	body := &GraphqlBody{
-		Query:     q,
-		Variables: v,
+		Query: q,
 	}
 
 	reqBody, err := json.Marshal(body)
@@ -91,7 +87,7 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 		return 0, fmt.Errorf("no accounts found")
 	}
 
-	// TODO: support multiple accounts
+	// TODO: support multiple accounts (only available in enterprise plan)
 	return accounts[0].ID, nil
 }
 
@@ -104,7 +100,7 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 		variables["userCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeUsersQuery(),
 		variables,
@@ -123,7 +119,7 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	var res OrgDetailResponse
 
-	err := c.Query(ctx, composeOrgQuery(), nil, &res)
+	err := c.doRequest(ctx, composeOrgQuery(), nil, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +136,7 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		variables["roleCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeRolesQuery(),
 		variables,
@@ -168,7 +164,7 @@ func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, curso
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeAllGroupsWithRoleQuery(),
 		variables,
@@ -209,7 +205,7 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 		variables["cursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeDomainsQuery(),
 		variables,
@@ -250,7 +246,7 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeGroupsQuery(),
 		variables,
@@ -286,7 +282,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 		variables["membersCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeGroupMembersQuery(),
 		variables,
@@ -334,7 +330,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 		"userId":  userId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeAddGroupMemberMutation(),
 		variables,
@@ -354,7 +350,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 		"userId":  userId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeRemoveGroupMemberMutation(),
 		variables,
@@ -374,7 +370,7 @@ func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error
 		"roleId":  roleId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeAddGroupRoleMutation(),
 		variables,
@@ -395,7 +391,7 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 		"roleId":    roleId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeAddAccountRoleMutation(),
 		variables,
@@ -415,7 +411,7 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 		"groupId": groupId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeAddOrgRoleMutation(),
 		variables,
@@ -435,7 +431,7 @@ func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) er
 		"roleId":  roleId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeRemoveGroupRoleMutation(),
 		variables,
@@ -456,7 +452,7 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 		"groupId":   groupId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeRemoveAccountRoleMutation(),
 		variables,
@@ -476,7 +472,7 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		"groupId": groupId,
 	}
 
-	err := c.Mutate(
+	err := c.doRequest(
 		ctx,
 		composeRemoveOrgRoleMutation(),
 		variables,
@@ -487,28 +483,6 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 	}
 
 	return nil
-}
-
-func (c *Client) Query(ctx context.Context, query string, variables map[string]interface{}, res interface{}) error {
-	vars := make(map[string]interface{}, len(variables)+1)
-
-	for k, v := range variables {
-		vars[k] = v
-	}
-
-	vars["userId"] = c.apikey
-
-	return c.doRequest(ctx, query, vars, res)
-}
-
-func (c *Client) Mutate(ctx context.Context, query string, variables map[string]interface{}, res interface{}) error {
-	vars := make(map[string]interface{}, len(variables)+1)
-
-	for k, v := range variables {
-		vars[k] = v
-	}
-
-	return c.doRequest(ctx, query, vars, res)
 }
 
 func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
