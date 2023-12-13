@@ -12,6 +12,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 const (
@@ -97,6 +99,12 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 		return nil, "", nil, err
 	}
 
+	// get role scope
+	roleScope, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_scope")
+	if !ok {
+		return nil, "", nil, fmt.Errorf("unable to get role scope from role trait profile")
+	}
+
 	// get role name
 	roleName, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_name")
 	if !ok {
@@ -105,8 +113,8 @@ func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *
 
 	permissionOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(groupResourceType),
-		ent.WithDisplayName(fmt.Sprintf("%s Role", resource.DisplayName)),
-		ent.WithDescription(fmt.Sprintf("%s access to %s group in DockerHub", roleMembership, resource.DisplayName)),
+		ent.WithDisplayName(fmt.Sprintf("%s - %s Role", resource.DisplayName, roleScope)),
+		ent.WithDescription(fmt.Sprintf("%s access to %s role in NewRelic", roleMembership, resource.DisplayName)),
 	}
 
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, roleName, permissionOptions...))
@@ -229,6 +237,101 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken 
 	default:
 		return nil, "", nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
 	}
+}
+
+const (
+	orgScope   = "organization"
+	accScope   = "account"
+	groupScope = "group"
+)
+
+func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	if principal.Id.ResourceType != groupResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only groups can be granted role membership",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only groups can be granted role membership")
+	}
+
+	// check if principal is valid in regards to scope of role entitlement
+	roleTrait, err := rs.GetRoleTrait(entitlement.Resource)
+	if err != nil {
+		return nil, err
+	}
+
+	roleScope, ok := rs.GetProfileStringValue(roleTrait.Profile, "role_scope")
+	if !ok {
+		return nil, fmt.Errorf("unable to get role scope from role trait profile")
+	}
+
+	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	switch roleScope {
+	case orgScope:
+		err = r.client.AddOrgRole(ctx, roleId, groupId)
+	case accScope:
+		err = r.client.AddAccountRole(ctx, roleId, groupId, r.client.AccountId)
+	case groupScope:
+		err = r.client.AddGroupRole(ctx, roleId, groupId)
+	default:
+		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to add role to group: %w", err)
+	}
+
+	return nil, nil
+}
+
+func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	principal := grant.Principal
+	entitlement := grant.Entitlement
+
+	if principal.Id.ResourceType != groupResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only groups can have role membership revoked",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only groups can have role membership revoked")
+	}
+
+	// check if principal is valid in regards to scope of role entitlement
+	roleTrait, err := rs.GetRoleTrait(entitlement.Resource)
+	if err != nil {
+		return nil, err
+	}
+
+	roleScope, ok := rs.GetProfileStringValue(roleTrait.Profile, "role_scope")
+	if !ok {
+		return nil, fmt.Errorf("unable to get role scope from role trait profile")
+	}
+
+	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	switch roleScope {
+	case orgScope:
+		err = r.client.RemoveOrgRole(ctx, roleId, groupId)
+	case accScope:
+		err = r.client.RemoveAccountRole(ctx, roleId, groupId, r.client.AccountId)
+	case groupScope:
+		err = r.client.RemoveGroupRole(ctx, roleId, groupId)
+	default:
+		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to remove role from group: %w", err)
+	}
+
+	return nil, nil
 }
 
 func newRoleBuilder(client *newrelic.Client) *roleBuilder {

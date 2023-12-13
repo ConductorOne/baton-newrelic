@@ -12,6 +12,8 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 const (
@@ -165,7 +167,7 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 	permissionOptions := []ent.EntitlementOption{
 		ent.WithGrantableTo(userResourceType),
 		ent.WithDisplayName(fmt.Sprintf("%s Group %s", resource.DisplayName, groupMembership)),
-		ent.WithDescription(fmt.Sprintf("%s access to %s group in DockerHub", groupMembership, resource.DisplayName)),
+		ent.WithDescription(fmt.Sprintf("%s access to %s group in NewRelic", groupMembership, resource.DisplayName)),
 	}
 
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, groupMembership, permissionOptions...))
@@ -214,6 +216,53 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 	}
 
 	return rv, next, nil, nil
+}
+
+func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	if principal.Id.ResourceType != userResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only users can be granted group membership",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only users can be granted group membership")
+	}
+
+	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	err := g.client.AddUserToGroup(ctx, groupId, userId)
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to add user to group: %w", err)
+	}
+
+	return nil, nil
+}
+
+func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
+	l := ctxzap.Extract(ctx)
+
+	principal := grant.Principal
+	entitlement := grant.Entitlement
+
+	if principal.Id.ResourceType != userResourceType.Id {
+		l.Warn(
+			"newrelic-connector: only users can have group membership revoked",
+			zap.String("principal_id", principal.Id.String()),
+			zap.String("principal_type", principal.Id.ResourceType),
+		)
+
+		return nil, fmt.Errorf("newrelic-connector: only users can have group membership revoked")
+	}
+
+	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	err := g.client.RemoveUserFromGroup(ctx, groupId, userId)
+	if err != nil {
+		return nil, fmt.Errorf("newrelic-connector: failed to remove user from group: %w", err)
+	}
+
+	return nil, nil
 }
 
 func newGroupBuilder(client *newrelic.Client) *groupBuilder {
