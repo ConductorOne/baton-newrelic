@@ -15,23 +15,80 @@ const (
 )
 
 type Client struct {
+	AccountId  int
 	httpClient *http.Client
 	apikey     string
 	baseURL    *url.URL
 }
 
-func NewClient(httpClient *http.Client, apikey string) *Client {
+func NewClient(ctx context.Context, httpClient *http.Client, apikey string) (*Client, error) {
 	u := &url.URL{
 		Scheme: "https",
 		Host:   BaseHost,
 		Path:   GraphQHEndpoint,
 	}
 
+	accId, err := GetAccountId(ctx, httpClient, u.String(), apikey)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Client{
 		httpClient: httpClient,
 		apikey:     apikey,
 		baseURL:    u,
+		AccountId:  accId,
+	}, nil
+}
+
+func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apikey string) (int, error) {
+	var res AccountsResponse
+	q := composeAccountsQuery()
+
+	body := &GraphqlBody{
+		Query: q,
 	}
+
+	reqBody, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		url,
+		bytes.NewReader(reqBody),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", apikey)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return 0, fmt.Errorf("failed to decode response body: %w", err)
+	}
+
+	accounts := res.Data.Actor.Accounts
+	if len(accounts) == 0 {
+		return 0, fmt.Errorf("no accounts found")
+	}
+
+	// TODO: support multiple accounts (only available in enterprise plan)
+	return accounts[0].ID, nil
 }
 
 // ListUsers return users across whole organization.
@@ -43,7 +100,7 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 		variables["userCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeUsersQuery(),
 		variables,
@@ -62,7 +119,7 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	var res OrgDetailResponse
 
-	err := c.Query(ctx, composeOrgQuery(), nil, &res)
+	err := c.doRequest(ctx, composeOrgQuery(), nil, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +136,7 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		variables["roleCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeRolesQuery(),
 		variables,
@@ -107,7 +164,7 @@ func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, curso
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeAllGroupsWithRoleQuery(),
 		variables,
@@ -148,7 +205,7 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 		variables["cursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeDomainsQuery(),
 		variables,
@@ -189,7 +246,7 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeGroupsQuery(),
 		variables,
@@ -225,7 +282,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 		variables["membersCursor"] = cursor
 	}
 
-	err := c.Query(
+	err := c.doRequest(
 		ctx,
 		composeGroupMembersQuery(),
 		variables,
@@ -266,23 +323,172 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 	return users, domains.Domains[0].Groups.Groups[0].Users.NextCursor, nil
 }
 
-type GraphqlBody struct {
-	Query     string                 `json:"query"`
-	Variables map[string]interface{} `json:"variables"`
-}
-
-func (c *Client) Query(ctx context.Context, query string, variables map[string]interface{}, res interface{}) error {
-	vars := make(map[string]interface{}, len(variables)+1)
-
-	for k, v := range variables {
-		vars[k] = v
+func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) error {
+	var res AddGroupMemberResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"userId":  userId,
 	}
 
-	vars["userId"] = c.apikey
+	err := c.doRequest(
+		ctx,
+		composeAddGroupMemberMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
 
+	return nil
+}
+
+func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string) error {
+	var res RemoveGroupMemberResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"userId":  userId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeRemoveGroupMemberMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error {
+	var res GrantRoleResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"roleId":  roleId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeAddGroupRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, accountId int) error {
+	var res GrantRoleResponse
+	variables := map[string]interface{}{
+		"accountId": accountId,
+		"groupId":   groupId,
+		"roleId":    roleId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeAddAccountRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
+	var res GrantRoleResponse
+	variables := map[string]interface{}{
+		"roleId":  roleId,
+		"groupId": groupId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeAddOrgRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) error {
+	var res RevokeRoleResponse
+	variables := map[string]interface{}{
+		"groupId": groupId,
+		"roleId":  roleId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeRemoveGroupRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, accountId int) error {
+	var res RevokeRoleResponse
+	variables := map[string]interface{}{
+		"accountId": accountId,
+		"roleId":    roleId,
+		"groupId":   groupId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeRemoveAccountRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) error {
+	var res RevokeRoleResponse
+	variables := map[string]interface{}{
+		"roleId":  roleId,
+		"groupId": groupId,
+	}
+
+	err := c.doRequest(
+		ctx,
+		composeRemoveOrgRoleMutation(),
+		variables,
+		&res,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
 	body := &GraphqlBody{
-		Query:     query,
-		Variables: vars,
+		Query:     q,
+		Variables: v,
 	}
 
 	reqBody, err := json.Marshal(body)

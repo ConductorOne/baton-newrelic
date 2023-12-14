@@ -59,7 +59,12 @@ func New(ctx context.Context, apikey string) (*NewRelic, error) {
 		return nil, err
 	}
 
+	nrClient, err := newrelic.NewClient(ctx, httpClient, apikey)
+	if err != nil {
+		return nil, err
+	}
+
 	return &NewRelic{
-		client: newrelic.NewClient(httpClient, apikey),
+		client: nrClient,
 	}, nil
 }
