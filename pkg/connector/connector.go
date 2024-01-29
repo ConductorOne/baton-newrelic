@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -54,9 +55,14 @@ func (nr *NewRelic) Validate(ctx context.Context) (annotations.Annotations, erro
 
 // New returns a new instance of the connector.
 func New(ctx context.Context, apikey string) (*NewRelic, error) {
-	httpClient, err := uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
-	if err != nil {
-		return nil, err
+	var httpClient *http.Client
+	var err error
+
+	if apikey != "" {
+		httpClient, err = uhttp.NewClient(ctx, uhttp.WithLogger(true, ctxzap.Extract(ctx)))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	nrClient, err := newrelic.NewClient(ctx, httpClient, apikey)
