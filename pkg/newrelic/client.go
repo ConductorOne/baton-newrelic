@@ -28,9 +28,13 @@ func NewClient(ctx context.Context, httpClient *http.Client, apikey string) (*Cl
 		Path:   GraphQHEndpoint,
 	}
 
-	accId, err := GetAccountId(ctx, httpClient, u.String(), apikey)
-	if err != nil {
-		return nil, err
+	var accId int
+	var err error
+	if httpClient != nil {
+		accId, err = GetAccountId(ctx, httpClient, u.String(), apikey)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &Client{
