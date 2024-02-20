@@ -510,7 +510,6 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 		Query:     q,
 		Variables: v,
 	}
-	// fmt.Println(body)
 	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return err

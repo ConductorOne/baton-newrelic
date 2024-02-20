@@ -220,6 +220,7 @@ func composeAccountsQuery() string {
 		}`, AccountsQ)
 }
 
+// https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-manage-users/
 func composeUsersQuery() string {
 	return fmt.Sprintf(
 		`query ListUsers($userCursor: String, $domainId: [ID!]) {
