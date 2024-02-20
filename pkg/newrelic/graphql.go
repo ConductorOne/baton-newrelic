@@ -6,7 +6,19 @@ import "fmt"
 const (
 	actorBaseQ = "actor { %s }"
 
-	usersQuery = `organization {
+	usersQuery = `users {
+		userSearch(cursor: $userCursor) {
+			nextCursor
+			totalCount
+			users {
+				email
+				name
+				userId
+			}
+		}
+	 }`
+
+	usersQueryV2 = `organization {
 		userManagement {
 			authenticationDomains(id: $domainId) {
 			authenticationDomains {
@@ -196,6 +208,7 @@ var (
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
 	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
+	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
 	RolesQ        = fmt.Sprintf(ManagementsQ, rolesQuery)
@@ -221,9 +234,16 @@ func composeAccountsQuery() string {
 }
 
 // https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-manage-users/
-func composeUsersQuery() string {
+func composeUsersQueryV2() string {
 	return fmt.Sprintf(
 		`query ListUsers($userCursor: String, $domainId: [ID!]) {
+			%s
+		}`, UsersQV2)
+}
+
+func composeUsersQuery() string {
+	return fmt.Sprintf(
+		`query ListUsers($userCursor: String) {
 			%s
 		}`, UsersQ)
 }

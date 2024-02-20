@@ -98,9 +98,11 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 // ListUsers return users across whole organization.
 func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
 	var (
-		res        UsersResponseV2
+		res        UsersResponse
+		resV2      UsersResponseV2
 		users      []User
 		nextCursor string
+		err        error
 	)
 	variables := map[string]interface{}{}
 	if cursor != "" {
@@ -108,7 +110,35 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		variables["domainId"] = domainId
 	}
 
-	err := c.doRequest(
+	if domainId != "" { // It has domain
+		err = c.doRequest(
+			ctx,
+			composeUsersQueryV2(),
+			variables,
+			&resV2,
+		)
+		if err != nil {
+			return nil, "", err
+		}
+
+		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
+		if len(authenticationDomains) == 0 {
+			return nil, "", fmt.Errorf("domain not found: %v", authenticationDomains)
+		}
+
+		if len(authenticationDomains) > 1 {
+			return nil, "", fmt.Errorf("found more domains")
+		}
+
+		for _, domain := range authenticationDomains {
+			users = domain.Users.Users
+			nextCursor = domain.Users.NextCursor
+		}
+
+		return users, nextCursor, nil
+	}
+
+	err = c.doRequest(
 		ctx,
 		composeUsersQuery(),
 		variables,
@@ -118,21 +148,9 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		return nil, "", err
 	}
 
-	authenticationDomains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-	if len(authenticationDomains) == 0 {
-		return nil, "", fmt.Errorf("domain not found: %v", authenticationDomains)
-	}
-
-	if len(authenticationDomains) > 1 {
-		return nil, "", fmt.Errorf("found more domains")
-	}
-
-	for _, domain := range authenticationDomains {
-		users = domain.Users.Users
-		nextCursor = domain.Users.NextCursor
-	}
-
-	return users, nextCursor, nil
+	return res.Data.Actor.Users.Search.Users,
+		res.Data.Actor.Users.Search.NextCursor,
+		nil
 }
 
 // GetOrg returns organization details.
