@@ -96,17 +96,21 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 }
 
 // ListUsers return users across whole organization.
-func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, error) {
-	var res UsersResponse
+func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
+	var (
+		res        UsersResponseV2
+		users      []User
+		nextCursor string
+	)
 	variables := map[string]interface{}{}
-
 	if cursor != "" {
 		variables["userCursor"] = cursor
+		variables["domainId"] = domainId
 	}
 
 	err := c.doRequest(
 		ctx,
-		composeUsersQuery(),
+		composeUsersQueryV2(),
 		variables,
 		&res,
 	)
@@ -114,9 +118,22 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 		return nil, "", err
 	}
 
-	return res.Data.Actor.Users.Search.Users,
-		res.Data.Actor.Users.Search.NextCursor,
-		nil
+	domains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
+	for _, domain := range domains {
+		nextCursor = domain.Users.NextCursor
+		for _, user := range domain.Users.Users {
+			users = append(users, User{
+				Name:  user.Name,
+				Email: user.Email,
+				ID:    user.ID,
+			})
+		}
+	}
+
+	return users, nextCursor, err
+	// return res.Data.Actor.Users.Search.Users,
+	// 	res.Data.Actor.Users.Search.NextCursor,
+	// 	nil
 }
 
 // GetOrg returns organization details.
@@ -494,7 +511,7 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 		Query:     q,
 		Variables: v,
 	}
-
+	// fmt.Println(body)
 	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return err

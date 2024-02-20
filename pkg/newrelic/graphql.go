@@ -7,16 +7,34 @@ const (
 	actorBaseQ = "actor { %s }"
 
 	usersQuery = `users {
-		userSearch(cursor: $userCursor) { 
-			nextCursor 
-			totalCount 
-			users { 
-				email 
-				name 
-				userId 
-			} 
+		userSearch(cursor: $userCursor) {
+			nextCursor
+			totalCount
+			users {
+				email
+				name
+				userId
+			}
 		}
 	 }`
+
+	usersQueryV2 = `organization {
+		userManagement {
+			authenticationDomains(id: $domainId) {
+			authenticationDomains {
+			  users(cursor: $userCursor) {
+				users {
+				  email
+				  id
+				  name
+				}
+				nextCursor
+				totalCount
+			  }
+			}
+		  }
+		}
+	  }`
 
 	accountsQuery = `accounts {
 		id
@@ -189,6 +207,7 @@ var (
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
 	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
+	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
 	RolesQ        = fmt.Sprintf(ManagementsQ, rolesQuery)
@@ -218,6 +237,13 @@ func composeUsersQuery() string {
 		`query ListUsers($userCursor: String) {
 			%s
 		}`, UsersQ)
+}
+
+func composeUsersQueryV2() string {
+	return fmt.Sprintf(
+		`query ListUsers($userCursor: String, $domainId: [ID!]) {
+			%s
+		}`, UsersQV2)
 }
 
 func composeOrgQuery() string {
@@ -349,6 +375,25 @@ type UsersResponse = QueryResponse[struct {
 			Users []User `json:"users"`
 		} `json:"userSearch"`
 	} `json:"users"`
+}]
+
+type UsersResponseV2 = QueryResponse[struct {
+	Organization struct {
+		UserManagement struct {
+			AuthenticationDomains struct {
+				AuthenticationDomains []struct {
+					Users struct {
+						ListBase
+						Users []struct {
+							Email string `json:"email"`
+							ID    string `json:"id"`
+							Name  string `json:"name"`
+						} `json:"users"`
+					} `json:"users"`
+				} `json:"authenticationDomains"`
+			} `json:"authenticationDomains"`
+		} `json:"userManagement"`
+	} `json:"organization"`
 }]
 
 type OrgResponse[T any] QueryResponse[struct {

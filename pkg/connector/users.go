@@ -52,6 +52,7 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
 func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+	var domainId string
 	if parentResourceID == nil {
 		return nil, "", nil, nil
 	}
@@ -62,7 +63,16 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		return nil, "", nil, err
 	}
 
-	users, nextCursor, err := u.client.ListUsers(ctx, bag.PageToken())
+	domains, _, err := u.client.ListDomains(ctx, bag.PageToken())
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	for _, domain := range domains {
+		domainId = domain.ID
+	}
+
+	users, nextCursor, err := u.client.ListUsers(ctx, domainId, bag.PageToken())
 	if err != nil {
 		return nil, "", nil, err
 	}
