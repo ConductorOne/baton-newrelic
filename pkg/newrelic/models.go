@@ -5,9 +5,10 @@ type BaseResource struct {
 }
 
 type User struct {
-	ID    string `json:"userId"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID                     string `json:"id"`
+	Email                  string `json:"email"`
+	Name                   string `json:"name"`
+	EmailVerificationState string `json:"emailVerificationState"`
 }
 
 type Org struct {

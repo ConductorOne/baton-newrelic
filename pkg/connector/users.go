@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
@@ -52,7 +53,10 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
 func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
-	var domainId string
+	var (
+		nextCursor string
+		users      []newrelic.User
+	)
 	if parentResourceID == nil {
 		return nil, "", nil, nil
 	}
@@ -68,13 +72,19 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		return nil, "", nil, err
 	}
 
-	for _, domain := range domains {
-		domainId = domain.ID
+	if len(domains) == 0 {
+		return nil, "", nil, fmt.Errorf("domain not found: %v", domains)
 	}
 
-	users, nextCursor, err := u.client.ListUsers(ctx, domainId, bag.PageToken())
-	if err != nil {
-		return nil, "", nil, err
+	if len(domains) > 1 {
+		return nil, "", nil, fmt.Errorf("found more domains")
+	}
+
+	for _, domain := range domains {
+		users, nextCursor, err = u.client.ListUsers(ctx, domain.ID, bag.PageToken())
+		if err != nil {
+			return nil, "", nil, err
+		}
 	}
 
 	// add next cursor to bag

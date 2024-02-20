@@ -6,19 +6,7 @@ import "fmt"
 const (
 	actorBaseQ = "actor { %s }"
 
-	usersQuery = `users {
-		userSearch(cursor: $userCursor) {
-			nextCursor
-			totalCount
-			users {
-				email
-				name
-				userId
-			}
-		}
-	 }`
-
-	usersQueryV2 = `organization {
+	usersQuery = `organization {
 		userManagement {
 			authenticationDomains(id: $domainId) {
 			authenticationDomains {
@@ -27,6 +15,7 @@ const (
 				  email
 				  id
 				  name
+				  emailVerificationState
 				}
 				nextCursor
 				totalCount
@@ -207,7 +196,6 @@ var (
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
 	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
-	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
 	RolesQ        = fmt.Sprintf(ManagementsQ, rolesQuery)
@@ -234,16 +222,9 @@ func composeAccountsQuery() string {
 
 func composeUsersQuery() string {
 	return fmt.Sprintf(
-		`query ListUsers($userCursor: String) {
-			%s
-		}`, UsersQ)
-}
-
-func composeUsersQueryV2() string {
-	return fmt.Sprintf(
 		`query ListUsers($userCursor: String, $domainId: [ID!]) {
 			%s
-		}`, UsersQV2)
+		}`, UsersQ)
 }
 
 func composeOrgQuery() string {
@@ -384,11 +365,7 @@ type UsersResponseV2 = QueryResponse[struct {
 				AuthenticationDomains []struct {
 					Users struct {
 						ListBase
-						Users []struct {
-							Email string `json:"email"`
-							ID    string `json:"id"`
-							Name  string `json:"name"`
-						} `json:"users"`
+						Users []User `json:"users"`
 					} `json:"users"`
 				} `json:"authenticationDomains"`
 			} `json:"authenticationDomains"`

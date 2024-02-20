@@ -110,7 +110,7 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 
 	err := c.doRequest(
 		ctx,
-		composeUsersQueryV2(),
+		composeUsersQuery(),
 		variables,
 		&res,
 	)
@@ -118,22 +118,21 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		return nil, "", err
 	}
 
-	domains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-	for _, domain := range domains {
+	authenticationDomains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
+	if len(authenticationDomains) == 0 {
+		return nil, "", fmt.Errorf("domain not found: %v", authenticationDomains)
+	}
+
+	if len(authenticationDomains) > 1 {
+		return nil, "", fmt.Errorf("found more domains")
+	}
+
+	for _, domain := range authenticationDomains {
+		users = domain.Users.Users
 		nextCursor = domain.Users.NextCursor
-		for _, user := range domain.Users.Users {
-			users = append(users, User{
-				Name:  user.Name,
-				Email: user.Email,
-				ID:    user.ID,
-			})
-		}
 	}
 
 	return users, nextCursor, err
-	// return res.Data.Actor.Users.Search.Users,
-	// 	res.Data.Actor.Users.Search.NextCursor,
-	// 	nil
 }
 
 // GetOrg returns organization details.
