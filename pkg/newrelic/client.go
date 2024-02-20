@@ -132,7 +132,7 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		nextCursor = domain.Users.NextCursor
 	}
 
-	return users, nextCursor, err
+	return users, nextCursor, nil
 }
 
 // GetOrg returns organization details.
