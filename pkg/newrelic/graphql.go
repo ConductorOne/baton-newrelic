@@ -386,7 +386,7 @@ type UsersResponseV2 = QueryResponse[struct {
 				AuthenticationDomains []struct {
 					Users struct {
 						ListBase
-						Users []User `json:"users"`
+						Users []UserV2 `json:"users"`
 					} `json:"users"`
 				} `json:"authenticationDomains"`
 			} `json:"authenticationDomains"`

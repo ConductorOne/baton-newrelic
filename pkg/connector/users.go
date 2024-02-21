@@ -71,12 +71,14 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		return nil, "", nil, err
 	}
 
-	if len(domains) == 0 || len(domains) > 1 {
-		domainID = ""
+	if len(domains) == 1 {
+		for _, domain := range domains {
+			domainID = domain.ID
+		}
 	}
 
-	for _, domain := range domains {
-		domainID = domain.ID
+	if len(domains) == 0 || len(domains) > 1 { // no domains or multiple domains
+		domainID = ""
 	}
 
 	users, nextCursor, err = u.client.ListUsers(ctx, domainID, bag.PageToken())

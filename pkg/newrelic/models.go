@@ -5,6 +5,12 @@ type BaseResource struct {
 }
 
 type User struct {
+	ID    string `json:"userId"`
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+type UserV2 struct {
 	ID                     string `json:"id"`
 	Email                  string `json:"email"`
 	Name                   string `json:"name"`

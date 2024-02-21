@@ -111,39 +111,39 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 	}
 
 	if domainId != "" { // It has domain
-		err = c.doRequest(
-			ctx,
-			composeUsersQueryV2(),
-			variables,
-			&resV2,
-		)
+		err = c.getResponse(ctx, composeUsersQueryV2, variables, &resV2)
 		if err != nil {
 			return nil, "", err
 		}
 
 		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-		if len(authenticationDomains) == 0 {
-			return nil, "", fmt.Errorf("domain not found: %v", authenticationDomains)
-		}
+		if len(authenticationDomains) == 0 || len(authenticationDomains) > 1 { // no domains or multiple domains
+			err = c.getResponse(ctx, composeUsersQuery, variables, &res)
+			if err != nil {
+				return nil, "", err
+			}
 
-		if len(authenticationDomains) > 1 {
-			return nil, "", fmt.Errorf("found more domains")
+			return res.Data.Actor.Users.Search.Users,
+				res.Data.Actor.Users.Search.NextCursor,
+				nil
 		}
 
 		for _, domain := range authenticationDomains {
-			users = domain.Users.Users
 			nextCursor = domain.Users.NextCursor
+			for _, user := range domain.Users.Users {
+				users = append(users, User{
+					Name:  user.Name,
+					Email: user.Email,
+					ID:    user.ID,
+				})
+			}
 		}
 
 		return users, nextCursor, nil
 	}
 
-	err = c.doRequest(
-		ctx,
-		composeUsersQuery(),
-		variables,
-		&res,
-	)
+	// It does not have a domain
+	err = c.getResponse(ctx, composeUsersQuery, variables, &res)
 	if err != nil {
 		return nil, "", err
 	}
@@ -151,6 +151,17 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 	return res.Data.Actor.Users.Search.Users,
 		res.Data.Actor.Users.Search.NextCursor,
 		nil
+}
+
+func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {
+	err := c.doRequest(
+		ctx,
+		query(),
+		variables,
+		&res,
+	)
+
+	return err
 }
 
 // GetOrg returns organization details.
