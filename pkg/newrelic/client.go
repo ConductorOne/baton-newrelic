@@ -117,32 +117,23 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		}
 
 		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-		if len(authenticationDomains) == 0 || len(authenticationDomains) > 1 { // no domains or multiple domains
-			err = c.getResponse(ctx, composeUsersQuery, variables, &res)
-			if err != nil {
-				return nil, "", err
+		if len(authenticationDomains) == 1 {
+			for _, domain := range authenticationDomains {
+				nextCursor = domain.Users.NextCursor
+				for _, user := range domain.Users.Users {
+					users = append(users, User{
+						Name:  user.Name,
+						Email: user.Email,
+						ID:    user.ID,
+					})
+				}
 			}
 
-			return res.Data.Actor.Users.Search.Users,
-				res.Data.Actor.Users.Search.NextCursor,
-				nil
+			return users, nextCursor, nil
 		}
-
-		for _, domain := range authenticationDomains {
-			nextCursor = domain.Users.NextCursor
-			for _, user := range domain.Users.Users {
-				users = append(users, User{
-					Name:  user.Name,
-					Email: user.Email,
-					ID:    user.ID,
-				})
-			}
-		}
-
-		return users, nextCursor, nil
 	}
 
-	// It does not have a domain
+	// no domains or multiple domains
 	err = c.getResponse(ctx, composeUsersQuery, variables, &res)
 	if err != nil {
 		return nil, "", err
