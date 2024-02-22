@@ -96,20 +96,45 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 }
 
 // ListUsers return users across whole organization.
-func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, error) {
-	var res UsersResponse
+func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
+	var (
+		res        UsersResponse
+		resV2      UsersResponseV2
+		users      []User
+		nextCursor string
+		err        error
+	)
 	variables := map[string]interface{}{}
-
 	if cursor != "" {
 		variables["userCursor"] = cursor
+		variables["domainId"] = domainId
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeUsersQuery(),
-		variables,
-		&res,
-	)
+	if domainId != "" { // It has domain
+		err = c.getResponse(ctx, composeUsersQueryV2, variables, &resV2)
+		if err != nil {
+			return nil, "", err
+		}
+
+		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
+		if len(authenticationDomains) == 1 {
+			for _, domain := range authenticationDomains {
+				nextCursor = domain.Users.NextCursor
+				for _, user := range domain.Users.Users {
+					users = append(users, User{
+						Name:  user.Name,
+						Email: user.Email,
+						ID:    user.ID,
+					})
+				}
+			}
+
+			return users, nextCursor, nil
+		}
+	}
+
+	// no domains or multiple domains
+	err = c.getResponse(ctx, composeUsersQuery, variables, &res)
 	if err != nil {
 		return nil, "", err
 	}
@@ -117,6 +142,17 @@ func (c *Client) ListUsers(ctx context.Context, cursor string) ([]User, string, 
 	return res.Data.Actor.Users.Search.Users,
 		res.Data.Actor.Users.Search.NextCursor,
 		nil
+}
+
+func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {
+	err := c.doRequest(
+		ctx,
+		query(),
+		variables,
+		&res,
+	)
+
+	return err
 }
 
 // GetOrg returns organization details.
@@ -494,7 +530,6 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 		Query:     q,
 		Variables: v,
 	}
-
 	reqBody, err := json.Marshal(body)
 	if err != nil {
 		return err

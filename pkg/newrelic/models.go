@@ -10,6 +10,13 @@ type User struct {
 	Name  string `json:"name"`
 }
 
+type UserV2 struct {
+	ID                     string `json:"id"`
+	Email                  string `json:"email"`
+	Name                   string `json:"name"`
+	EmailVerificationState string `json:"emailVerificationState"`
+}
+
 type Org struct {
 	BaseResource
 	Name string `json:"name"`

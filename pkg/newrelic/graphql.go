@@ -7,16 +7,35 @@ const (
 	actorBaseQ = "actor { %s }"
 
 	usersQuery = `users {
-		userSearch(cursor: $userCursor) { 
-			nextCursor 
-			totalCount 
-			users { 
-				email 
-				name 
-				userId 
-			} 
+		userSearch(cursor: $userCursor) {
+			nextCursor
+			totalCount
+			users {
+				email
+				name
+				userId
+			}
 		}
 	 }`
+
+	usersQueryV2 = `organization {
+		userManagement {
+			authenticationDomains(id: $domainId) {
+			authenticationDomains {
+			  users(cursor: $userCursor) {
+				users {
+				  email
+				  id
+				  name
+				  emailVerificationState
+				}
+				nextCursor
+				totalCount
+			  }
+			}
+		  }
+		}
+	  }`
 
 	accountsQuery = `accounts {
 		id
@@ -189,6 +208,7 @@ var (
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
 	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
+	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
 	RolesQ        = fmt.Sprintf(ManagementsQ, rolesQuery)
@@ -211,6 +231,14 @@ func composeAccountsQuery() string {
 		`query ListAccounts {
 			%s
 		}`, AccountsQ)
+}
+
+// https://docs.newrelic.com/docs/apis/nerdgraph/examples/nerdgraph-manage-users/
+func composeUsersQueryV2() string {
+	return fmt.Sprintf(
+		`query ListUsers($userCursor: String, $domainId: [ID!]) {
+			%s
+		}`, UsersQV2)
 }
 
 func composeUsersQuery() string {
@@ -349,6 +377,21 @@ type UsersResponse = QueryResponse[struct {
 			Users []User `json:"users"`
 		} `json:"userSearch"`
 	} `json:"users"`
+}]
+
+type UsersResponseV2 = QueryResponse[struct {
+	Organization struct {
+		UserManagement struct {
+			AuthenticationDomains struct {
+				AuthenticationDomains []struct {
+					Users struct {
+						ListBase
+						Users []UserV2 `json:"users"`
+					} `json:"users"`
+				} `json:"authenticationDomains"`
+			} `json:"authenticationDomains"`
+		} `json:"userManagement"`
+	} `json:"organization"`
 }]
 
 type OrgResponse[T any] QueryResponse[struct {
