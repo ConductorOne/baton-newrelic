@@ -15,6 +15,11 @@ var (
 		field.WithDisplayName("API Key"),
 	)
 
+	BaseURLField = field.StringField(
+		"base-url",
+		field.WithDescription("Override the NewRelic API URL (for testing)"),
+	)
+
 	// FieldRelationships defines relationships between the fields listed in
 	// Config that can be automatically validated.
 	FieldRelationships = []field.SchemaFieldRelationship{}
@@ -23,6 +28,7 @@ var (
 //go:generate go run ./gen
 var Config = field.NewConfiguration([]field.SchemaField{
 	Apikey,
+	BaseURLField,
 })
 
 // ValidateConfig is run after the configuration is loaded, and should return an

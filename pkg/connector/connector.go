@@ -54,7 +54,7 @@ func (nr *NewRelic) Validate(ctx context.Context) (annotations.Annotations, erro
 }
 
 // New returns a new instance of the connector.
-func New(ctx context.Context, apikey string) (*NewRelic, error) {
+func New(ctx context.Context, apikey string, baseURL string) (*NewRelic, error) {
 	var httpClient *http.Client
 	var err error
 
@@ -65,7 +65,7 @@ func New(ctx context.Context, apikey string) (*NewRelic, error) {
 		}
 	}
 
-	nrClient, err := newrelic.NewClient(ctx, httpClient, apikey)
+	nrClient, err := newrelic.NewClient(ctx, httpClient, apikey, baseURL)
 	if err != nil {
 		return nil, err
 	}

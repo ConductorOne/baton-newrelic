@@ -21,11 +21,20 @@ type Client struct {
 	baseURL    *url.URL
 }
 
-func NewClient(ctx context.Context, httpClient *http.Client, apikey string) (*Client, error) {
-	u := &url.URL{
-		Scheme: "https",
-		Host:   BaseHost,
-		Path:   GraphQHEndpoint,
+func NewClient(ctx context.Context, httpClient *http.Client, apikey string, baseURL string) (*Client, error) {
+	var u *url.URL
+	if baseURL != "" {
+		var err error
+		u, err = url.Parse(baseURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base URL: %w", err)
+		}
+	} else {
+		u = &url.URL{
+			Scheme: "https",
+			Host:   BaseHost,
+			Path:   GraphQHEndpoint,
+		}
 	}
 
 	var accId int
