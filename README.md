@@ -1,8 +1,8 @@
 ![Baton Logo](./docs/images/baton-logo.png)
 
-# `baton-newrelic` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-newrelic.svg)](https://pkg.go.dev/github.com/conductorone/baton-newrelic) ![main ci](https://github.com/conductorone/baton-newrelic/actions/workflows/main.yaml/badge.svg)
+# `baton-newrelic` [![Go Reference](https://pkg.go.dev/badge/github.com/conductorone/baton-newrelic.svg)](https://pkg.go.dev/github.com/conductorone/baton-newrelic) ![verify](https://github.com/conductorone/baton-newrelic/actions/workflows/verify.yaml/badge.svg)
 
-`baton-newrelic` is a connector for NewRelic built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It communicates with the NewRelic GraphQL API, NerdGraph, to sync data about organizations, roles, groups and users. 
+`baton-newrelic` is a connector for NewRelic built using the [Baton SDK](https://github.com/conductorone/baton-sdk). It communicates with the NewRelic GraphQL API, NerdGraph, to sync data about organizations, roles, groups and users.
 
 Check out [Baton](https://github.com/conductorone/baton) to learn more about the project in general.
 
