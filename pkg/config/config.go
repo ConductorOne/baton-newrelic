@@ -19,6 +19,7 @@ var (
 		"base-url",
 		field.WithDescription("Override the NewRelic API URL (for testing)"),
 		field.WithHidden(true),
+		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 
 	// FieldRelationships defines relationships between the fields listed in
