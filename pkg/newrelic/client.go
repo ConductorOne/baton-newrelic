@@ -12,6 +12,10 @@ import (
 const (
 	BaseHost        = "api.newrelic.com"
 	GraphQHEndpoint = "/graphql"
+
+	domainIDKey = "domainId"
+	roleIDKey   = "roleId"
+	groupIDKey  = "groupId"
 )
 
 type Client struct {
@@ -21,11 +25,20 @@ type Client struct {
 	baseURL    *url.URL
 }
 
-func NewClient(ctx context.Context, httpClient *http.Client, apikey string) (*Client, error) {
-	u := &url.URL{
-		Scheme: "https",
-		Host:   BaseHost,
-		Path:   GraphQHEndpoint,
+func NewClient(ctx context.Context, httpClient *http.Client, apikey string, baseURL string) (*Client, error) {
+	var u *url.URL
+	if baseURL != "" {
+		var err error
+		u, err = url.Parse(baseURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid base URL: %w", err)
+		}
+	} else {
+		u = &url.URL{
+			Scheme: "https",
+			Host:   BaseHost,
+			Path:   GraphQHEndpoint,
+		}
 	}
 
 	var accId int
@@ -195,8 +208,8 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, cursor string) ([]Group, string, error) {
 	var res GroupsResponse
 	variables := map[string]interface{}{
-		"domainId": domainId,
-		"roleId":   roleId,
+		domainIDKey: domainId,
+		roleIDKey:   roleId,
 	}
 
 	// set variables for pagination
@@ -278,7 +291,7 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Group, string, error) {
 	var res GroupsResponse
 	variables := map[string]interface{}{
-		"domainId": domainId,
+		domainIDKey: domainId,
 	}
 
 	// set variables for pagination
@@ -314,8 +327,8 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor string) ([]string, string, error) {
 	var res GroupMembersResponse
 	variables := map[string]interface{}{
-		"domainId": domainId,
-		"groupId":  groupId,
+		domainIDKey: domainId,
+		groupIDKey:  groupId,
 	}
 
 	if cursor != "" {
@@ -366,7 +379,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) error {
 	var res AddGroupMemberResponse
 	variables := map[string]interface{}{
-		"groupId": groupId,
+		groupIDKey: groupId,
 		"userId":  userId,
 	}
 
@@ -386,7 +399,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string) error {
 	var res RemoveGroupMemberResponse
 	variables := map[string]interface{}{
-		"groupId": groupId,
+		groupIDKey: groupId,
 		"userId":  userId,
 	}
 
@@ -406,8 +419,8 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error {
 	var res GrantRoleResponse
 	variables := map[string]interface{}{
-		"groupId": groupId,
-		"roleId":  roleId,
+		groupIDKey: groupId,
+		roleIDKey:  roleId,
 	}
 
 	err := c.doRequest(
@@ -447,8 +460,8 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 	var res GrantRoleResponse
 	variables := map[string]interface{}{
-		"roleId":  roleId,
-		"groupId": groupId,
+		roleIDKey:  roleId,
+		groupIDKey: groupId,
 	}
 
 	err := c.doRequest(
@@ -467,8 +480,8 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) error {
 	var res RevokeRoleResponse
 	variables := map[string]interface{}{
-		"groupId": groupId,
-		"roleId":  roleId,
+		groupIDKey: groupId,
+		roleIDKey:  roleId,
 	}
 
 	err := c.doRequest(
@@ -508,8 +521,8 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) error {
 	var res RevokeRoleResponse
 	variables := map[string]interface{}{
-		"roleId":  roleId,
-		"groupId": groupId,
+		roleIDKey:  roleId,
+		groupIDKey: groupId,
 	}
 
 	err := c.doRequest(
