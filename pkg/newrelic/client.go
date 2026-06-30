@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 const (
@@ -16,6 +17,7 @@ const (
 	domainIDKey = "domainId"
 	roleIDKey   = "roleId"
 	groupIDKey  = "groupId"
+	userIDKey   = "userId"
 )
 
 type Client struct {
@@ -380,7 +382,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 	var res AddGroupMemberResponse
 	variables := map[string]interface{}{
 		groupIDKey: groupId,
-		"userId":  userId,
+		userIDKey:  userId,
 	}
 
 	err := c.doRequest(
@@ -400,7 +402,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 	var res RemoveGroupMemberResponse
 	variables := map[string]interface{}{
 		groupIDKey: groupId,
-		"userId":  userId,
+		userIDKey:  userId,
 	}
 
 	err := c.doRequest(
@@ -535,6 +537,147 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		return err
 	}
 
+	return nil
+}
+
+// GetUserByEmail searches for a user by email address across all users.
+// Returns nil, nil if not found.
+func (c *Client) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	var cursor string
+	for {
+		users, nextCursor, err := c.ListUsers(ctx, "", cursor)
+		if err != nil {
+			return nil, fmt.Errorf("baton-newrelic: failed to list users while searching by email: %w", err)
+		}
+		for i := range users {
+			if users[i].Email == email {
+				return &users[i], nil
+			}
+		}
+		if nextCursor == "" {
+			break
+		}
+		cursor = nextCursor
+	}
+	return nil, nil
+}
+
+// CreateUser creates a new user in the given authentication domain.
+func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, userType string) (string, error) {
+	var res CreateUserResponse
+	variables := map[string]interface{}{
+		"authDomainId": authDomainId,
+		"email":        email,
+		"name":         name,
+		"userType":     userType,
+	}
+
+	body := &GraphqlBody{
+		Query:     composeCreateUserMutation(),
+		Variables: variables,
+	}
+	reqBody, err := marshalAndPost(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res)
+	_ = reqBody
+	if err != nil {
+		return "", err
+	}
+
+	if len(res.Errors) > 0 {
+		return "", fmt.Errorf("baton-newrelic: create user failed: %s", res.Errors[0].Message)
+	}
+
+	return res.Data.UserManagementCreateUser.CreatedUser.ID, nil
+}
+
+// UpdateUser updates an existing user's attributes (any of email, name, userType may be empty to skip).
+func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType string) error {
+	variables := map[string]interface{}{
+		userIDKey: userId,
+	}
+	if email != "" {
+		variables["email"] = email
+	}
+	if name != "" {
+		variables["name"] = name
+	}
+	if userType != "" {
+		variables["userType"] = userType
+	}
+
+	var res UpdateUserResponse
+	body := &GraphqlBody{
+		Query:     composeUpdateUserMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 {
+		return fmt.Errorf("baton-newrelic: update user failed: %s", res.Errors[0].Message)
+	}
+	return nil
+}
+
+// DeleteUser permanently deletes a user. Returns nil if user is not found (idempotent).
+func (c *Client) DeleteUser(ctx context.Context, userId string) error {
+	variables := map[string]interface{}{
+		userIDKey: userId,
+	}
+
+	var res DeleteUserResponse
+	body := &GraphqlBody{
+		Query:     composeDeleteUserMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 {
+		msg := res.Errors[0].Message
+		if isNotFoundErr(msg) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: delete user failed: %s", msg)
+	}
+	return nil
+}
+
+func isNotFoundErr(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "not found") || strings.Contains(lower, "does not exist") || strings.Contains(lower, "no user")
+}
+
+func marshalAndPost(ctx context.Context, httpClient *http.Client, url, apikey string, body *GraphqlBody, res interface{}) ([]byte, error) {
+	return nil, doRawRequest(ctx, httpClient, url, apikey, body, res)
+}
+
+func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
+	reqBody, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", apikey)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+		return fmt.Errorf("baton-newrelic: failed to decode response: %w", err)
+	}
 	return nil
 }
 

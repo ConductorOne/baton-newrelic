@@ -346,6 +346,61 @@ func composeRemoveOrgRoleMutation() string {
 		}`, RemoveOrgRole)
 }
 
+func composeCreateUserMutation() string {
+	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTier!) {
+		userManagementCreateUser(
+			createUserOptions: {
+				authenticationDomainId: $authDomainId
+				email: $email
+				name: $name
+				userType: $userType
+			}
+		) {
+			createdUser {
+				id
+				email
+				name
+				type {
+					displayName
+				}
+			}
+		}
+	}`
+}
+
+func composeUpdateUserMutation() string {
+	return `mutation UpdateUser($userId: ID!, $email: String, $name: String, $userType: UserManagementRequestedTier) {
+		userManagementUpdateUser(
+			updateUserOptions: {
+				id: $userId
+				email: $email
+				name: $name
+				userType: $userType
+			}
+		) {
+			user {
+				id
+				email
+				name
+			}
+		}
+	}`
+}
+
+func composeDeleteUserMutation() string {
+	return `mutation DeleteUser($userId: ID!) {
+		userManagementDeleteUser(
+			deleteUserOptions: {
+				id: $userId
+			}
+		) {
+			deletedUser {
+				id
+			}
+		}
+	}`
+}
+
 // Request body structure for graphql queries and mutations.
 type GraphqlBody struct {
 	Query     string                 `json:"query"`
@@ -492,5 +547,56 @@ type RevokeRoleResponse struct {
 				ID          int    `json:"roleId"`
 			} `json:"roles"`
 		} `json:"authorizationManagementRevokeAccess"`
+	} `json:"data"`
+}
+
+// GraphqlError represents a single error in a NerdGraph response.
+type GraphqlError struct {
+	Message    string                 `json:"message"`
+	Extensions map[string]interface{} `json:"extensions"`
+}
+
+// GraphqlErrorResponse wraps data with possible top-level errors.
+type GraphqlErrorResponse struct {
+	Errors []GraphqlError `json:"errors"`
+}
+
+type CreateUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementCreateUser struct {
+			CreatedUser struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+				Name  string `json:"name"`
+				Type  struct {
+					DisplayName string `json:"displayName"`
+				} `json:"type"`
+			} `json:"createdUser"`
+		} `json:"userManagementCreateUser"`
+	} `json:"data"`
+}
+
+type UpdateUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementUpdateUser struct {
+			User struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+				Name  string `json:"name"`
+			} `json:"user"`
+		} `json:"userManagementUpdateUser"`
+	} `json:"data"`
+}
+
+type DeleteUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementDeleteUser struct {
+			DeletedUser struct {
+				ID string `json:"id"`
+			} `json:"deletedUser"`
+		} `json:"userManagementDeleteUser"`
 	} `json:"data"`
 }

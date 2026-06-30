@@ -34,7 +34,7 @@ func getConnector(ctx context.Context, cc *cfg.Newrelic, opts *cli.ConnectorOpts
 		return nil, nil, err
 	}
 
-	cb, err := connector.New(ctx, cc.Apikey, cc.BaseUrl)
+	cb, err := connector.New(ctx, cc.Apikey, cc.BaseUrl, cc.AuthenticationDomainId)
 	if err != nil {
 		l.Error("error creating connector", zap.Error(err))
 		return nil, nil, err
