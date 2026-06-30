@@ -87,3 +87,27 @@ baton-test run action update_user                  → PASS (name update invoked
   "connectorCapabilities": ["CAPABILITY_PROVISION", "CAPABILITY_SYNC", "CAPABILITY_ACCOUNT_PROVISIONING", "CAPABILITY_RESOURCE_DELETE", "CAPABILITY_ACTIONS"]
 }
 ```
+
+---
+
+## Review-Fixes Pass (post-commit 03b871b)
+
+Addressed six findings from the PR review bot:
+
+| # | Severity | Finding | Fix | Location |
+|---|----------|---------|-----|----------|
+| 1 | SHOULD-FIX | **UpdateUser null-propagation** — static mutation always sends `email/name/userType` as variables; absent fields arrive as `null` and NerdGraph clears them | `composeUpdateUserMutation` now accepts `[]string` of field names and builds a dynamic mutation that only includes fields being set | `pkg/newrelic/graphql.go:371`, `pkg/newrelic/client.go:594-626` |
+| 2 | SHOULD-FIX | **GraphQL errors-array not inspected in doRequest** — HTTP 200 with `{"errors":[...]}` silently treated as success, causing orphaned users on AddUserToGroup failure | `doRequest` now reads the body into `[]byte`, unmarshal-checks a `{Errors}` struct, and returns an error if non-empty before decoding into `res` | `pkg/newrelic/client.go:684-734` |
+| 3 | SHOULD-FIX | **Dead code: marshalAndPost** — always returned `nil, error`; caller discarded the `[]byte` with `_ =` | Removed `marshalAndPost`; `CreateUser` calls `doRawRequest` directly | `pkg/newrelic/client.go:565-590` |
+| 4 | SHOULD-FIX | **Group-add orphan** — `AlreadyExistsResult` path returned without retrying `AddUserToGroup`; a retry after a failed group-add could never recover | `AlreadyExistsResult` path now attempts `AddUserToGroup` before returning, so retries succeed | `pkg/connector/users.go:189-200` |
+| 5 | NIT | **PII logging** — `update_user` action logged `email` + `name` at Info level | Moved `name`/`email` to `l.Debug`; only `user_id` + `user_type` remain at Info | `pkg/connector/connector.go:176-182` |
+| 6 | NIT | **Missing `baton-newrelic:` prefix** — marshal/request-create errors in `doRequest`/`doRawRequest` lacked the connector prefix | Added `fmt.Errorf("baton-newrelic: ...")` wrapping to all bare returns in both helpers | `pkg/newrelic/client.go:654-682,684-734` |
+
+**CI fix (validate_metadata):** Added `Users` row to `docs/connector.mdx` capabilities table (Sync + Provision) to satisfy the docs-check that requires doc updates when capabilities change vs. main. Also added trailing newlines to `baton_capabilities.json` and `config_schema.json` (review nit).
+
+**baton-test results after review-fixes (mock path — localhost:18080):**
+```
+baton-test run sync                      → PASS (4 resources, 2 entitlements, 1 grant)
+baton-test run provisioning user --full  → PASS (create user-101, verify, delete, dup-delete, verify gone)
+baton-test run action update_user        → PASS (name update invoked + completed)
+```

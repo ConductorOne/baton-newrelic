@@ -175,9 +175,11 @@ func (nr *NewRelic) GlobalActions(ctx context.Context, registry actions.ActionRe
 
 		l.Info("update_user action invoked",
 			zap.String(actionArgUserID, userID),
+			zap.String("user_type", userType),
+		)
+		l.Debug("update_user action details",
 			zap.String("name", name),
 			zap.String("email", email),
-			zap.String("user_type", userType),
 		)
 
 		if err := nr.client.UpdateUser(ctx, userID, email, name, userType); err != nil {

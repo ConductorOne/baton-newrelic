@@ -368,14 +368,28 @@ func composeCreateUserMutation() string {
 	}`
 }
 
-func composeUpdateUserMutation() string {
-	return `mutation UpdateUser($userId: ID!, $email: String, $name: String, $userType: UserManagementRequestedTier) {
+// composeUpdateUserMutation builds a mutation that only includes fields the caller
+// is actually setting. Omitting a field entirely prevents NerdGraph from nulling it.
+func composeUpdateUserMutation(updateFields []string) string {
+	varDecl := "$userId: ID!"
+	optBody := ""
+	for _, f := range updateFields {
+		switch f {
+		case "email":
+			varDecl += ", $email: String"
+			optBody += "\n\t\t\t\temail: $email"
+		case "name":
+			varDecl += ", $name: String"
+			optBody += "\n\t\t\t\tname: $name"
+		case "userType":
+			varDecl += ", $userType: UserManagementRequestedTier"
+			optBody += "\n\t\t\t\tuserType: $userType"
+		}
+	}
+	return fmt.Sprintf(`mutation UpdateUser(%s) {
 		userManagementUpdateUser(
 			updateUserOptions: {
-				id: $userId
-				email: $email
-				name: $name
-				userType: $userType
+				id: $userId%s
 			}
 		) {
 			user {
@@ -384,7 +398,7 @@ func composeUpdateUserMutation() string {
 				name
 			}
 		}
-	}`
+	}`, varDecl, optBody)
 }
 
 func composeDeleteUserMutation() string {

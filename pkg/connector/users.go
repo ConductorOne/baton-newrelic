@@ -184,6 +184,15 @@ func (u *userBuilder) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to check for existing user: %w", err)
 	}
 	if existing != nil {
+		// Still attempt group-add so that a retry after a prior group-add failure succeeds.
+		if profile != nil {
+			if v, ok := profile.GetFields()["group_id"]; ok && v.GetStringValue() != "" {
+				groupID := v.GetStringValue()
+				if addErr := u.client.AddUserToGroup(ctx, groupID, existing.ID); addErr != nil {
+					return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to add existing user to group %s: %w", groupID, addErr)
+				}
+			}
+		}
 		existingResource, err := userResource(ctx, nil, existing)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to build existing user resource: %w", err)

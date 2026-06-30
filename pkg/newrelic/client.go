@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -576,9 +577,7 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 		Query:     composeCreateUserMutation(),
 		Variables: variables,
 	}
-	reqBody, err := marshalAndPost(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res)
-	_ = reqBody
-	if err != nil {
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return "", err
 	}
 
@@ -590,23 +589,28 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 }
 
 // UpdateUser updates an existing user's attributes (any of email, name, userType may be empty to skip).
+// Only non-empty fields are included in the mutation so absent fields are left unchanged.
 func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType string) error {
 	variables := map[string]interface{}{
 		userIDKey: userId,
 	}
+	var updateFields []string
 	if email != "" {
 		variables["email"] = email
+		updateFields = append(updateFields, "email")
 	}
 	if name != "" {
 		variables["name"] = name
+		updateFields = append(updateFields, "name")
 	}
 	if userType != "" {
 		variables["userType"] = userType
+		updateFields = append(updateFields, "userType")
 	}
 
 	var res UpdateUserResponse
 	body := &GraphqlBody{
-		Query:     composeUpdateUserMutation(),
+		Query:     composeUpdateUserMutation(updateFields),
 		Variables: variables,
 	}
 	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
@@ -647,19 +651,15 @@ func isNotFoundErr(msg string) bool {
 	return strings.Contains(lower, "not found") || strings.Contains(lower, "does not exist") || strings.Contains(lower, "no user")
 }
 
-func marshalAndPost(ctx context.Context, httpClient *http.Client, url, apikey string, body *GraphqlBody, res interface{}) ([]byte, error) {
-	return nil, doRawRequest(ctx, httpClient, url, apikey, body, res)
-}
-
 func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(reqBody))
 	if err != nil {
-		return err
+		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -688,7 +688,7 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 	}
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -698,7 +698,7 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 		bytes.NewReader(reqBody),
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -708,15 +708,26 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 	if err != nil {
 		return err
 	}
-
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
-		return fmt.Errorf("failed to decode response body: %w", err)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("baton-newrelic: failed to read response body: %w", err)
+	}
+
+	var errCheck struct {
+		Errors []GraphqlError `json:"errors"`
+	}
+	if json.Unmarshal(bodyBytes, &errCheck) == nil && len(errCheck.Errors) > 0 {
+		return fmt.Errorf("baton-newrelic: graphql error: %s", errCheck.Errors[0].Message)
+	}
+
+	if err := json.Unmarshal(bodyBytes, res); err != nil {
+		return fmt.Errorf("baton-newrelic: failed to decode response body: %w", err)
 	}
 
 	return nil
