@@ -346,6 +346,31 @@ func composeRemoveOrgRoleMutation() string {
 		}`, RemoveOrgRole)
 }
 
+// composeGetUserByEmailQuery returns a NerdGraph query that finds a user by email
+// across all authentication domains and returns the v2 identity id required by
+// user-management mutations (userManagementAddUsersToGroups, etc.).
+func composeGetUserByEmailQuery() string {
+	return `query GetUserByEmail($email: String!) {
+		actor {
+			organization {
+				userManagement {
+					authenticationDomains {
+						authenticationDomains {
+							users(search: {email: $email}) {
+								users {
+									id
+									email
+									name
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}`
+}
+
 func composeCreateUserMutation() string {
 	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTier!) {
 		userManagementCreateUser(
@@ -375,10 +400,10 @@ func composeUpdateUserMutation(updateFields []string) string {
 	optBody := ""
 	for _, f := range updateFields {
 		switch f {
-		case "email":
+		case emailKey:
 			varDecl += ", $email: String"
 			optBody += "\n\t\t\t\temail: $email"
-		case "name":
+		case nameKey:
 			varDecl += ", $name: String"
 			optBody += "\n\t\t\t\tname: $name"
 		case "userType":
@@ -612,5 +637,25 @@ type DeleteUserResponse struct {
 				ID string `json:"id"`
 			} `json:"deletedUser"`
 		} `json:"userManagementDeleteUser"`
+	} `json:"data"`
+}
+
+// GetUserByEmailResponse holds the result of a composeGetUserByEmailQuery call.
+type GetUserByEmailResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		Actor struct {
+			Organization struct {
+				UserManagement struct {
+					AuthenticationDomains struct {
+						AuthenticationDomains []struct {
+							Users struct {
+								Users []UserV2 `json:"users"`
+							} `json:"users"`
+						} `json:"authenticationDomains"`
+					} `json:"authenticationDomains"`
+				} `json:"userManagement"`
+			} `json:"organization"`
+		} `json:"actor"`
 	} `json:"data"`
 }

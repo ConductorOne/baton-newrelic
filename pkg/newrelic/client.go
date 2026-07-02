@@ -19,6 +19,8 @@ const (
 	roleIDKey   = "roleId"
 	groupIDKey  = "groupId"
 	userIDKey   = "userId"
+	emailKey    = "email"
+	nameKey     = "name"
 )
 
 type Client struct {
@@ -161,22 +163,14 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 }
 
 func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {
-	err := c.doRequest(
-		ctx,
-		query(),
-		variables,
-		&res,
-	)
-
-	return err
+	return c.doReadRequest(ctx, query(), variables, &res)
 }
 
 // GetOrg returns organization details.
 func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	var res OrgDetailResponse
 
-	err := c.doRequest(ctx, composeOrgQuery(), nil, &res)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeOrgQuery(), nil, &res); err != nil {
 		return nil, err
 	}
 
@@ -192,13 +186,7 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		variables["roleCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRolesQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeRolesQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -220,13 +208,7 @@ func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, curso
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAllGroupsWithRoleQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeAllGroupsWithRoleQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -261,13 +243,7 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 		variables["cursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeDomainsQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeDomainsQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -302,13 +278,7 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeGroupsQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeGroupsQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -338,13 +308,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 		variables["membersCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeGroupMembersQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeGroupMembersQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -541,24 +505,27 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 	return nil
 }
 
-// GetUserByEmail searches for a user by email address across all users.
-// Returns nil, nil if not found.
+// GetUserByEmail returns the user with the given email using a single filtered
+// NerdGraph v2 query. The returned User.ID is the v2 identity id required by
+// user-management mutations. Returns nil, nil if no match is found.
 func (c *Client) GetUserByEmail(ctx context.Context, email string) (*User, error) {
-	var cursor string
-	for {
-		users, nextCursor, err := c.ListUsers(ctx, "", cursor)
-		if err != nil {
-			return nil, fmt.Errorf("baton-newrelic: failed to list users while searching by email: %w", err)
-		}
-		for i := range users {
-			if users[i].Email == email {
-				return &users[i], nil
+	var res GetUserByEmailResponse
+	body := &GraphqlBody{
+		Query:     composeGetUserByEmailQuery(),
+		Variables: map[string]interface{}{emailKey: email},
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return nil, fmt.Errorf("baton-newrelic: GetUserByEmail request failed: %w", err)
+	}
+	if len(res.Errors) > 0 {
+		return nil, fmt.Errorf("baton-newrelic: GetUserByEmail failed: %s", res.Errors[0].Message)
+	}
+	for _, domain := range res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
+		for _, u := range domain.Users.Users {
+			if strings.EqualFold(u.Email, email) {
+				return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
 			}
 		}
-		if nextCursor == "" {
-			break
-		}
-		cursor = nextCursor
 	}
 	return nil, nil
 }
@@ -568,8 +535,8 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 	var res CreateUserResponse
 	variables := map[string]interface{}{
 		"authDomainId": authDomainId,
-		"email":        email,
-		"name":         name,
+		emailKey:       email,
+		nameKey:        name,
 		"userType":     userType,
 	}
 
@@ -596,12 +563,12 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 	}
 	var updateFields []string
 	if email != "" {
-		variables["email"] = email
-		updateFields = append(updateFields, "email")
+		variables[emailKey] = email
+		updateFields = append(updateFields, emailKey)
 	}
 	if name != "" {
-		variables["name"] = name
-		updateFields = append(updateFields, "name")
+		variables[nameKey] = name
+		updateFields = append(updateFields, nameKey)
 	}
 	if userType != "" {
 		variables["userType"] = userType
@@ -637,18 +604,26 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 		return err
 	}
 	if len(res.Errors) > 0 {
-		msg := res.Errors[0].Message
-		if isNotFoundErr(msg) {
+		if isNotFoundErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: delete user failed: %s", msg)
+		return fmt.Errorf("baton-newrelic: delete user failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
 
-func isNotFoundErr(msg string) bool {
-	lower := strings.ToLower(msg)
-	return strings.Contains(lower, "not found") || strings.Contains(lower, "does not exist") || strings.Contains(lower, "no user")
+// isNotFoundErr reports whether a NerdGraph error represents a "not found" condition.
+// It checks the errorClass extension first (preferred) and falls back to message
+// substring matching, including NR's literal not-found message.
+func isNotFoundErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok && class == "NOT_FOUND" {
+		return true
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "does not exist") ||
+		strings.Contains(lower, "no user") ||
+		strings.Contains(lower, "could not find the target")
 }
 
 func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
@@ -681,6 +656,47 @@ func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey s
 	return nil
 }
 
+// doReadRequest executes a GraphQL query and tolerates top-level errors alongside
+// partial data. NerdGraph can return usable list data together with non-fatal
+// field-level errors on read/list paths; aborting on any error would discard
+// valid results. For mutations, use doRequest which fails strictly on errors.
+func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
+	body := &GraphqlBody{
+		Query:     q,
+		Variables: v,
+	}
+	reqBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.String(), bytes.NewReader(reqBody))
+	if err != nil {
+		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", c.apikey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+		return fmt.Errorf("baton-newrelic: failed to decode response body: %w", err)
+	}
+	return nil
+}
+
+// doRequest executes a GraphQL query and fails if the response contains any
+// top-level errors. Use for mutations where a GraphQL error must surface as a
+// Go error. For sync/list reads that can return partial data, use doReadRequest.
 func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
 	body := &GraphqlBody{
 		Query:     q,
