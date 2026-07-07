@@ -6,18 +6,6 @@ import "fmt"
 const (
 	actorBaseQ = "actor { %s }"
 
-	usersQuery = `users {
-		userSearch(cursor: $userCursor) {
-			nextCursor
-			totalCount
-			users {
-				email
-				name
-				userId
-			}
-		}
-	 }`
-
 	usersQueryV2 = `organization {
 		userManagement {
 			authenticationDomains(id: $domainId) {
@@ -207,7 +195,6 @@ var (
 	OrgQ         = fmt.Sprintf(actorBaseQ, orgQuery)
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
-	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
 	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
@@ -239,13 +226,6 @@ func composeUsersQueryV2() string {
 		`query ListUsers($userCursor: String, $domainId: [ID!]) {
 			%s
 		}`, UsersQV2)
-}
-
-func composeUsersQuery() string {
-	return fmt.Sprintf(
-		`query ListUsers($userCursor: String) {
-			%s
-		}`, UsersQ)
 }
 
 func composeOrgQuery() string {

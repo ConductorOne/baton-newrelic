@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
@@ -20,6 +21,15 @@ type userBuilder struct {
 	resourceType           *v2.ResourceType
 	client                 *newrelic.Client
 	authenticationDomainID string
+}
+
+// multiDomainState is JSON-encoded as the pagination cursor when an org has more
+// than one authentication domain. Cursors in NerdGraph are domain-specific, so
+// we must paginate each domain's users independently.
+type multiDomainState struct {
+	DomainIDs  []string `json:"dids"`
+	DomainIdx  int      `json:"didx"`
+	UserCursor string   `json:"uc,omitempty"`
 }
 
 func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -58,10 +68,6 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
 func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
-	var (
-		nextCursor, domainID string
-		users                []newrelic.User
-	)
 	if parentResourceID == nil {
 		return nil, nil, nil
 	}
@@ -71,27 +77,86 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		return nil, nil, err
 	}
 
-	domains, _, err := u.client.ListDomains(ctx, bag.PageToken())
-	if err != nil {
-		return nil, nil, err
+	rawCursor := bag.PageToken()
+
+	// Decode cursor: either a plain string (single-domain) or JSON multiDomainState.
+	var mds *multiDomainState
+	if len(rawCursor) > 0 && rawCursor[0] == '{' {
+		var s multiDomainState
+		if err := json.Unmarshal([]byte(rawCursor), &s); err != nil {
+			return nil, nil, fmt.Errorf("baton-newrelic: invalid pagination cursor: %w", err)
+		}
+		mds = &s
 	}
 
-	if len(domains) == 1 {
-		for _, domain := range domains {
-			domainID = domain.ID
+	var domainID, userCursor string
+
+	if mds != nil {
+		// Resuming a multi-domain sync: use stored domain list and cursor.
+		if mds.DomainIdx >= len(mds.DomainIDs) {
+			next, err := bag.NextToken("")
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, &resource.SyncOpResults{NextPageToken: next}, nil
+		}
+		domainID = mds.DomainIDs[mds.DomainIdx]
+		userCursor = mds.UserCursor
+	} else {
+		// First call or single-domain continuation: discover domains (they are few
+		// and always fit in one NerdGraph page, so no domain cursor is needed).
+		domains, _, err := u.client.ListDomains(ctx, "")
+		if err != nil {
+			return nil, nil, err
+		}
+		switch len(domains) {
+		case 0:
+			return nil, nil, nil
+		case 1:
+			domainID = domains[0].ID
+			userCursor = rawCursor // plain cursor is safe for a single domain
+		default:
+			// Multiple domains: initialize per-domain pagination.
+			// NerdGraph cursors are domain-specific; a shared cursor would be
+			// mis-applied to every domain after the first page.
+			ids := make([]string, len(domains))
+			for i, d := range domains {
+				ids[i] = d.ID
+			}
+			mds = &multiDomainState{DomainIDs: ids}
+			domainID = ids[0]
+			userCursor = ""
 		}
 	}
 
-	if len(domains) == 0 || len(domains) > 1 { // no domains or multiple domains
-		domainID = ""
-	}
-
-	users, nextCursor, err = u.client.ListUsers(ctx, domainID, bag.PageToken())
+	users, nextUserCursor, err := u.client.ListUsers(ctx, domainID, userCursor)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	next, err := bag.NextToken(nextCursor)
+	var nextCursorStr string
+	if mds != nil {
+		switch {
+		case nextUserCursor != "":
+			b, _ := json.Marshal(multiDomainState{
+				DomainIDs:  mds.DomainIDs,
+				DomainIdx:  mds.DomainIdx,
+				UserCursor: nextUserCursor,
+			})
+			nextCursorStr = string(b)
+		case mds.DomainIdx+1 < len(mds.DomainIDs):
+			b, _ := json.Marshal(multiDomainState{
+				DomainIDs: mds.DomainIDs,
+				DomainIdx: mds.DomainIdx + 1,
+			})
+			nextCursorStr = string(b)
+		// default: all domains exhausted → nextCursorStr = "" signals completion
+		}
+	} else {
+		nextCursorStr = nextUserCursor
+	}
+
+	next, err := bag.NextToken(nextCursorStr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,7 +168,6 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		if err != nil {
 			return nil, nil, err
 		}
-
 		rv = append(rv, ur)
 	}
 
