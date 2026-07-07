@@ -649,6 +649,10 @@ func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey s
 // partial data. NerdGraph can return usable list data together with non-fatal
 // field-level errors on read/list paths; aborting on any error would discard
 // valid results. For mutations, use doRequest which fails strictly on errors.
+//
+// Total failures — NerdGraph HTTP 200 with data=null and a non-empty errors array
+// (e.g. auth/permission denied) — are returned as errors so callers never
+// silently treat a failed read as an empty page.
 func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
 	body := &GraphqlBody{
 		Query:     q,
@@ -677,7 +681,24 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("baton-newrelic: failed to read response body: %w", err)
+	}
+
+	// Detect total failure: data=null with errors present. Partial-data responses
+	// (data != null alongside errors) are tolerated on read paths.
+	var raw struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []GraphqlError  `json:"errors"`
+	}
+	if json.Unmarshal(bodyBytes, &raw) == nil && len(raw.Errors) > 0 {
+		if len(raw.Data) == 0 || string(raw.Data) == "null" {
+			return fmt.Errorf("baton-newrelic: graphql read failed: %s", raw.Errors[0].Message)
+		}
+	}
+
+	if err := json.Unmarshal(bodyBytes, res); err != nil {
 		return fmt.Errorf("baton-newrelic: failed to decode response body: %w", err)
 	}
 	return nil
