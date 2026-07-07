@@ -141,11 +141,14 @@ func (u *userBuilder) CreateAccount(
 ) (connectorbuilder.CreateAccountResponse, []*v2.PlaintextData, annotations.Annotations, error) {
 	profile := accountInfo.GetProfile()
 
-	email := accountInfo.GetLogin()
-	if email == "" && profile != nil {
+	email := ""
+	if profile != nil {
 		if v, ok := profile.GetFields()["email"]; ok {
 			email = v.GetStringValue()
 		}
+	}
+	if email == "" {
+		email = accountInfo.GetLogin()
 	}
 	if email == "" {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires an email address")

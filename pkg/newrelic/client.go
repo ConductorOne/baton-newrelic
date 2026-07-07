@@ -113,53 +113,42 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 	return accounts[0].ID, nil
 }
 
-// ListUsers return users across whole organization.
+// ListUsers returns users across the organization via the NerdGraph v2
+// user-management query. Resource IDs are always v2 identity ids (required by
+// userManagementDeleteUser and other mutations), including when zero or multiple
+// authentication domains exist.
 func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
-	var (
-		res        UsersResponse
-		resV2      UsersResponseV2
-		users      []User
-		nextCursor string
-		err        error
-	)
+	var resV2 UsersResponseV2
 	variables := map[string]interface{}{}
 	if cursor != "" {
 		variables["userCursor"] = cursor
+	}
+	if domainId != "" {
 		variables["domainId"] = domainId
 	}
 
-	if domainId != "" { // It has domain
-		err = c.getResponse(ctx, composeUsersQueryV2, variables, &resV2)
-		if err != nil {
-			return nil, "", err
-		}
-
-		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-		if len(authenticationDomains) == 1 {
-			for _, domain := range authenticationDomains {
-				nextCursor = domain.Users.NextCursor
-				for _, user := range domain.Users.Users {
-					users = append(users, User{
-						Name:  user.Name,
-						Email: user.Email,
-						ID:    user.ID,
-					})
-				}
-			}
-
-			return users, nextCursor, nil
-		}
-	}
-
-	// no domains or multiple domains
-	err = c.getResponse(ctx, composeUsersQuery, variables, &res)
-	if err != nil {
+	if err := c.getResponse(ctx, composeUsersQueryV2, variables, &resV2); err != nil {
 		return nil, "", err
 	}
 
-	return res.Data.Actor.Users.Search.Users,
-		res.Data.Actor.Users.Search.NextCursor,
-		nil
+	var (
+		users      []User
+		nextCursor string
+	)
+	for _, domain := range resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
+		for _, user := range domain.Users.Users {
+			users = append(users, User{
+				Name:  user.Name,
+				Email: user.Email,
+				ID:    user.ID,
+			})
+		}
+		if nextCursor == "" && domain.Users.NextCursor != "" {
+			nextCursor = domain.Users.NextCursor
+		}
+	}
+
+	return users, nextCursor, nil
 }
 
 func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {

@@ -198,3 +198,53 @@ func TestDeleteUser_NotFoundIsSuccess(t *testing.T) {
 		t.Errorf("DeleteUser should return nil for not-found, got: %v", err)
 	}
 }
+
+// --- ListUsers always returns v2 identity ids (no v1 fallback) ---
+
+func TestListUsers_ReturnsV2IDs(t *testing.T) {
+	const wantID = "v2-identity-xyz"
+	queryHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": map[string]interface{}{
+				"actor": map[string]interface{}{
+					"organization": map[string]interface{}{
+						"userManagement": map[string]interface{}{
+							"authenticationDomains": map[string]interface{}{
+								"authenticationDomains": []interface{}{
+									map[string]interface{}{
+										"users": map[string]interface{}{
+											"users": []interface{}{
+												map[string]interface{}{
+													"id":    wantID,
+													"email": "bob@example.com",
+													"name":  "Bob",
+												},
+											},
+											"nextCursor": nil,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	})
+	srv := httptest.NewServer(accountsHandler(queryHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+	users, _, err := client.ListUsers(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].ID != wantID {
+		t.Errorf("ID = %q, want %q (v2 identity id, not v1 userId)", users[0].ID, wantID)
+	}
+}
+
