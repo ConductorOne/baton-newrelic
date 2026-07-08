@@ -28,10 +28,15 @@ var (
 )
 
 //go:generate go run ./gen
-var Config = field.NewConfiguration([]field.SchemaField{
-	Apikey,
-	BaseURLField,
-})
+var Config = field.NewConfiguration(
+	[]field.SchemaField{
+		Apikey,
+		BaseURLField,
+	},
+	field.WithConnectorDisplayName("New Relic"),
+	field.WithIconUrl("/static/app-icons/new-relic.svg"),
+	field.WithHelpUrl("/docs/baton/new-relic"),
+)
 
 // ValidateConfig is run after the configuration is loaded, and should return an
 // error if it isn't valid. Implementing this function is optional, it only
