@@ -16,7 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-
 const (
 	groupMembership = "member"
 )
