@@ -339,16 +339,19 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 		userIDKey:  userId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddGroupMemberMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddGroupMemberMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: add user to group failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -613,6 +616,22 @@ func isNotFoundErr(e GraphqlError) bool {
 		strings.Contains(lower, "does not exist") ||
 		strings.Contains(lower, "no user") ||
 		strings.Contains(lower, "could not find the target")
+}
+
+// isAlreadyMemberErr reports whether a NerdGraph error represents an "already a member"
+// condition for group membership mutations — treated as success for idempotency.
+func isAlreadyMemberErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok {
+		switch class {
+		case "DUPLICATE", "ALREADY_EXISTS", "CONFLICT":
+			return true
+		}
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "already a member") ||
+		strings.Contains(lower, "already in the group") ||
+		strings.Contains(lower, "already added") ||
+		strings.Contains(lower, "duplicate")
 }
 
 func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {

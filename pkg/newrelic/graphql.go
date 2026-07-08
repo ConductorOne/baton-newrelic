@@ -526,6 +526,7 @@ type GroupMembersResponse = OrgUserManagementResponse[struct {
 }]
 
 type AddGroupMemberResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Groups []struct {
