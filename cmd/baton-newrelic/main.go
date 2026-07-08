@@ -25,7 +25,7 @@ func main() {
 		"baton-newrelic",
 		getConnector,
 		cfg.Config,
-		connectorrunner.WithDefaultCapabilitiesConnectorBuilder(&connector.NewRelic{}),
+		connectorrunner.WithDefaultCapabilitiesConnectorBuilderV2(&connector.NewRelic{}),
 	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
