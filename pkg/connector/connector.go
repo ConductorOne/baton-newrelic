@@ -79,13 +79,6 @@ func (nr *NewRelic) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 			Order:       4,
 			StringField: authDomainField,
 		}.Build(),
-		"group_id": v2.ConnectorAccountCreationSchema_Field_builder{
-			DisplayName: "Group ID",
-			Description: "Optional: the ID of a group to add the user to immediately after creation",
-			Required:    false,
-			Order:       5,
-			StringField: &v2.ConnectorAccountCreationSchema_StringField{},
-		}.Build(),
 	}
 
 	return &v2.ConnectorMetadata{
