@@ -18,9 +18,9 @@ type NewRelic struct {
 	client *newrelic.Client
 }
 
-// ResourceSyncers returns a ResourceSyncer for each resource type that should be synced from the upstream service.
-func (nr *NewRelic) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncer {
-	return []connectorbuilder.ResourceSyncer{
+// ResourceSyncers returns a ResourceSyncerV2 for each resource type that should be synced from the upstream service.
+func (nr *NewRelic) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
+	return []connectorbuilder.ResourceSyncerV2{
 		newOrgBuilder(nr.client),
 		newUserBuilder(nr.client),
 		newGroupBuilder(nr.client),

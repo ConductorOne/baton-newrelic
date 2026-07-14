@@ -53,29 +53,25 @@ func groupResource(ctx context.Context, parentId *v2.ResourceId, domainId string
 
 // List returns all the groups from the database as resource objects.
 // Groups include a GroupTrait because they are the 'shape' of a standard group.
-func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts rs.SyncOpAttrs) ([]*v2.Resource, *rs.SyncOpResults, error) {
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
-	// parse the token
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: domainResourceType})
+	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: domainResourceType})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	switch bag.ResourceTypeID() {
 	case domainResourceType:
-		// list and paginate through domains
 		domains, nextDomainsCursor, err := g.client.ListDomains(ctx, bag.PageToken())
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
-		// remove old cursors from bag
 		bag.Pop()
 
-		// add cursor for paginating next domains to bag
 		if nextDomainsCursor != "" {
 			bag.Push(
 				pagination.PageState{
@@ -90,7 +86,6 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 				continue
 			}
 
-			// add cursors for paginating groups under this domain
 			bag.Push(
 				pagination.PageState{
 					ResourceTypeID: groupResourceType.Id,
@@ -99,46 +94,42 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 			)
 		}
 
-		// if there are no more cursors, return nil
 		var token string
 		if bag.Current() != nil {
 			token = bag.PageToken()
 		}
 
-		// handle next iteration
 		next, err := bag.NextToken(token)
 		if err != nil {
 			if err.Error() != "no active page state" {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 		}
 
-		return nil, next, nil, nil
+		return nil, &rs.SyncOpResults{NextPageToken: next}, nil
 
 	case groupResourceType.Id:
-		// list and paginate through groups within a domain
 		parts := strings.Split(bag.PageToken(), ":")
 		if len(parts) != 2 {
-			return nil, "", nil, fmt.Errorf("invalid page token: %s (type: %s)", bag.PageToken(), bag.ResourceTypeID())
+			return nil, nil, fmt.Errorf("invalid page token: %s (type: %s)", bag.PageToken(), bag.ResourceTypeID())
 		}
 
 		domainId := parts[0]
 		cursor := parts[1]
 
-		// list all groups within all domains with specific role
 		groups, nextGroupsCursor, err := g.client.ListGroups(ctx, domainId, cursor)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		c, err := composeCursor(domainId, nextGroupsCursor)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		next, err := bag.NextToken(c)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		var rv []*v2.Resource
@@ -147,21 +138,21 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 
 			gr, err := groupResource(ctx, parentResourceID, domainId, &groupCopy)
 			if err != nil {
-				return nil, "", nil, err
+				return nil, nil, err
 			}
 
 			rv = append(rv, gr)
 		}
 
-		return rv, next, nil, nil
+		return rv, &rs.SyncOpResults{NextPageToken: next}, nil
 
 	default:
-		return nil, "", nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
+		return nil, nil, fmt.Errorf("invalid resource type: %s", bag.ResourceTypeID())
 	}
 }
 
-// Entitlements always returns an empty slice for groups.
-func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
+// Entitlements returns the member entitlement for a group.
+func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var rv []*v2.Entitlement
 
 	permissionOptions := []ent.EntitlementOption{
@@ -172,35 +163,34 @@ func (g *groupBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ 
 
 	rv = append(rv, ent.NewAssignmentEntitlement(resource, groupMembership, permissionOptions...))
 
-	return rv, "", nil, nil
+	return rv, &rs.SyncOpResults{}, nil
 }
 
-// Grants always returns an empty slice for groups since they don't have any entitlements.
-func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+// Grants returns grants for members of a group.
+func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs.SyncOpAttrs) ([]*v2.Grant, *rs.SyncOpResults, error) {
+	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	// obtain domain id from group profile
 	groupTrait, err := rs.GetGroupTrait(resource)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	domainId, ok := rs.GetProfileStringValue(groupTrait.Profile, "group_domain")
 	if !ok {
-		return nil, "", nil, fmt.Errorf("unable to get domain id from group trait profile")
+		return nil, nil, fmt.Errorf("unable to get domain id from group trait profile")
 	}
 
 	members, nextDomainsCursor, err := g.client.ListGroupMembers(ctx, domainId, resource.Id.Resource, bag.PageToken())
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	next, err := bag.NextToken(nextDomainsCursor)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	var rv []*v2.Grant
@@ -215,7 +205,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken
 		))
 	}
 
-	return rv, next, nil, nil
+	return rv, &rs.SyncOpResults{NextPageToken: next}, nil
 }
 
 func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {

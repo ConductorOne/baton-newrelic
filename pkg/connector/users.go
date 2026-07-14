@@ -5,8 +5,6 @@ import (
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
-	"github.com/conductorone/baton-sdk/pkg/annotations"
-	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 )
 
@@ -50,24 +48,23 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
-func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, pToken *pagination.Token) ([]*v2.Resource, string, annotations.Annotations, error) {
+func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
 	var (
 		nextCursor, domainID string
 		users                []newrelic.User
 	)
 	if parentResourceID == nil {
-		return nil, "", nil, nil
+		return nil, nil, nil
 	}
 
-	// parse the token
-	bag, err := parsePageToken(pToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
+	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	domains, _, err := u.client.ListDomains(ctx, bag.PageToken())
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	if len(domains) == 1 {
@@ -82,13 +79,12 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 	users, nextCursor, err = u.client.ListUsers(ctx, domainID, bag.PageToken())
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
-	// add next cursor to bag
 	next, err := bag.NextToken(nextCursor)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, err
 	}
 
 	var rv []*v2.Resource
@@ -96,23 +92,23 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		userCopy := user
 		ur, err := userResource(ctx, parentResourceID, &userCopy)
 		if err != nil {
-			return nil, "", nil, err
+			return nil, nil, err
 		}
 
 		rv = append(rv, ur)
 	}
 
-	return rv, next, nil, nil
+	return rv, &resource.SyncOpResults{NextPageToken: next}, nil
 }
 
 // Entitlements always returns an empty slice for users.
-func (u *userBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ *pagination.Token) ([]*v2.Entitlement, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (u *userBuilder) Entitlements(_ context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Entitlement, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 // Grants always returns an empty slice for users since they don't have any entitlements.
-func (u *userBuilder) Grants(ctx context.Context, resource *v2.Resource, pToken *pagination.Token) ([]*v2.Grant, string, annotations.Annotations, error) {
-	return nil, "", nil, nil
+func (u *userBuilder) Grants(_ context.Context, _ *v2.Resource, _ resource.SyncOpAttrs) ([]*v2.Grant, *resource.SyncOpResults, error) {
+	return nil, nil, nil
 }
 
 func newUserBuilder(client *newrelic.Client) *userBuilder {
