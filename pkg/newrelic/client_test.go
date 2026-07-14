@@ -233,6 +233,42 @@ func TestRemoveUserFromGroup_OtherGraphQLErrorSurfaces(t *testing.T) {
 	}
 }
 
+// --- Add*Role idempotency: already-granted treated as success ---
+
+func TestAddGroupRole_AlreadyGrantedIsSuccess(t *testing.T) {
+	// NerdGraph returns HTTP 200 with an errors array carrying an already-granted signal.
+	// AddGroupRole must treat this as success (nil error) for idempotency.
+	alreadyGrantedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"role already added to group","extensions":{"errorClass":"DUPLICATE"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(alreadyGrantedHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.AddGroupRole(context.Background(), "role-1", "group-1"); err != nil {
+		t.Errorf("AddGroupRole should return nil for already-granted role, got: %v", err)
+	}
+}
+
+func TestAddGroupRole_OtherGraphQLErrorSurfaces(t *testing.T) {
+	errHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"permission denied","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(errHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.AddGroupRole(context.Background(), "role-1", "group-1"); err == nil {
+		t.Error("AddGroupRole should return error for non-already-granted GraphQL errors, got nil")
+	}
+}
+
 // --- ListUsers always returns v2 identity ids (no v1 fallback) ---
 
 func TestListUsers_ReturnsV2IDs(t *testing.T) {

@@ -550,6 +550,7 @@ type RemoveGroupMemberResponse struct {
 }
 
 type GrantRoleResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Roles []struct {

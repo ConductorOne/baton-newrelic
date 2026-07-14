@@ -385,16 +385,19 @@ func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error
 		roleIDKey:  roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddGroupRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddGroupRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: add group role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -406,16 +409,19 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 		"roleId":    roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddAccountRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddAccountRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: add account role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -426,16 +432,19 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 		groupIDKey: groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddOrgRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddOrgRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: add org role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -619,6 +628,15 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 // isNotFoundErr reports whether a NerdGraph error represents a "not found" condition.
 // It checks the errorClass extension first (preferred) and falls back to message
 // substring matching, including NR's literal not-found message.
+//
+// NOTE: NerdGraph's literal message "could not find the target or you are unauthorized."
+// bundles both "resource not found" and "permission denied" into a single string, so the
+// substring match on "could not find the target" cannot distinguish a genuine missing
+// resource from an authorization failure. Idempotent-revoke correctness is prioritized
+// here: treating a permission error as success is considered an acceptable tradeoff
+// compared to surfacing a spurious error on every repeated revoke. If NerdGraph ever
+// returns a distinct errorClass (e.g. "UNAUTHORIZED") for permission failures this
+// branch should be tightened to use errorClass-only matching for those callers.
 func isNotFoundErr(e GraphqlError) bool {
 	if class, ok := e.Extensions["errorClass"].(string); ok && class == "NOT_FOUND" {
 		return true
