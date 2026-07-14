@@ -93,6 +93,8 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 	if mds != nil {
 		// Resuming a multi-domain sync: use stored domain list and cursor.
+		// DomainIdx >= len is a defensive guard; the cursor-marshal logic below never
+		// encodes an out-of-range index, so this branch is unreachable in normal flow.
 		if mds.DomainIdx >= len(mds.DomainIDs) {
 			next, err := bag.NextToken("")
 			if err != nil {
@@ -138,17 +140,23 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	if mds != nil {
 		switch {
 		case nextUserCursor != "":
-			b, _ := json.Marshal(multiDomainState{
+			b, merr := json.Marshal(multiDomainState{
 				DomainIDs:  mds.DomainIDs,
 				DomainIdx:  mds.DomainIdx,
 				UserCursor: nextUserCursor,
 			})
+			if merr != nil {
+				return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
+			}
 			nextCursorStr = string(b)
 		case mds.DomainIdx+1 < len(mds.DomainIDs):
-			b, _ := json.Marshal(multiDomainState{
+			b, merr := json.Marshal(multiDomainState{
 				DomainIDs: mds.DomainIDs,
 				DomainIdx: mds.DomainIdx + 1,
 			})
+			if merr != nil {
+				return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
+			}
 			nextCursorStr = string(b)
 			// default: all domains exhausted → nextCursorStr = "" signals completion
 		}
