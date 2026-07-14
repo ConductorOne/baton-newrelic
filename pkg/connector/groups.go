@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -224,6 +225,9 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
 	err := g.client.AddUserToGroup(ctx, groupId, userId)
 	if err != nil {
+		if errors.Is(err, newrelic.ErrAlreadyMember) {
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
+		}
 		return nil, fmt.Errorf("newrelic-connector: failed to add user to group: %w", err)
 	}
 
@@ -249,6 +253,9 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
 	err := g.client.RemoveUserFromGroup(ctx, groupId, userId)
 	if err != nil {
+		if errors.Is(err, newrelic.ErrNotMember) {
+			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+		}
 		return nil, fmt.Errorf("newrelic-connector: failed to remove user from group: %w", err)
 	}
 

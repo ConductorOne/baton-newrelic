@@ -3,6 +3,7 @@ package newrelic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -201,7 +202,7 @@ func TestDeleteUser_NotFoundIsSuccess(t *testing.T) {
 
 // --- T7: RemoveUserFromGroup treats not-found as success (idempotent revoke) ---
 
-func TestRemoveUserFromGroup_NotFoundIsSuccess(t *testing.T) {
+func TestRemoveUserFromGroup_NotFoundIsErrNotMember(t *testing.T) {
 	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -212,8 +213,9 @@ func TestRemoveUserFromGroup_NotFoundIsSuccess(t *testing.T) {
 
 	client := newTestClient(t, srv.URL)
 
-	if err := client.RemoveUserFromGroup(context.Background(), "group-1", "missing-user"); err != nil {
-		t.Errorf("RemoveUserFromGroup should return nil for not-found, got: %v", err)
+	err := client.RemoveUserFromGroup(context.Background(), "group-1", "missing-user")
+	if !errors.Is(err, ErrNotMember) {
+		t.Errorf("RemoveUserFromGroup should return ErrNotMember for not-found, got: %v", err)
 	}
 }
 

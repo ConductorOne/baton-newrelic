@@ -4,12 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 )
+
+// ErrAlreadyMember is returned by AddUserToGroup when the user is already in the group.
+var ErrAlreadyMember = errors.New("user already a member of group")
+
+// ErrNotMember is returned by RemoveUserFromGroup when the user is not in the group.
+var ErrNotMember = errors.New("user not a member of group")
 
 const (
 	BaseHost        = "api.newrelic.com"
@@ -348,7 +355,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 	}
 	if len(res.Errors) > 0 {
 		if isAlreadyMemberErr(res.Errors[0]) {
-			return nil
+			return ErrAlreadyMember
 		}
 		return fmt.Errorf("baton-newrelic: add user to group failed: %s", res.Errors[0].Message)
 	}
@@ -371,7 +378,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 	}
 	if len(res.Errors) > 0 {
 		if isNotFoundErr(res.Errors[0]) {
-			return nil
+			return ErrNotMember
 		}
 		return fmt.Errorf("baton-newrelic: remove user from group failed: %s", res.Errors[0].Message)
 	}
@@ -667,12 +674,12 @@ func isAlreadyMemberErr(e GraphqlError) bool {
 func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
+		return fmt.Errorf("failed to marshal graphql request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
+		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -685,11 +692,11 @@ func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey s
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
-		return fmt.Errorf("baton-newrelic: failed to decode response: %w", err)
+		return fmt.Errorf("failed to decode graphql response: %w", err)
 	}
 	return nil
 }
@@ -709,12 +716,12 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 	}
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
+		return fmt.Errorf("failed to marshal graphql request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.String(), bytes.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
+		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -727,12 +734,12 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to read response body: %w", err)
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	// Detect total failure: data=null with errors present. Partial-data responses
@@ -743,12 +750,12 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 	}
 	if json.Unmarshal(bodyBytes, &raw) == nil && len(raw.Errors) > 0 {
 		if len(raw.Data) == 0 || string(raw.Data) == "null" {
-			return fmt.Errorf("baton-newrelic: graphql read failed: %s", raw.Errors[0].Message)
+			return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
 		}
 	}
 
 	if err := json.Unmarshal(bodyBytes, res); err != nil {
-		return fmt.Errorf("baton-newrelic: failed to decode response body: %w", err)
+		return fmt.Errorf("failed to decode response body: %w", err)
 	}
 	return nil
 }
@@ -763,7 +770,7 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 	}
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to marshal request: %w", err)
+		return fmt.Errorf("failed to marshal graphql request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -773,7 +780,7 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 		bytes.NewReader(reqBody),
 	)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to create request: %w", err)
+		return fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -786,23 +793,23 @@ func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("baton-newrelic: unexpected status code: %d", resp.StatusCode)
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("baton-newrelic: failed to read response body: %w", err)
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	var errCheck struct {
 		Errors []GraphqlError `json:"errors"`
 	}
 	if json.Unmarshal(bodyBytes, &errCheck) == nil && len(errCheck.Errors) > 0 {
-		return fmt.Errorf("baton-newrelic: graphql error: %s", errCheck.Errors[0].Message)
+		return fmt.Errorf("graphql error: %s", errCheck.Errors[0].Message)
 	}
 
 	if err := json.Unmarshal(bodyBytes, res); err != nil {
-		return fmt.Errorf("baton-newrelic: failed to decode response body: %w", err)
+		return fmt.Errorf("failed to decode response body: %w", err)
 	}
 
 	return nil
