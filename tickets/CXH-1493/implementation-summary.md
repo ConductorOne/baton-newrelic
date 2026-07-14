@@ -4,7 +4,7 @@
 
 ### Overview
 Added full user-account lifecycle provisioning to baton-newrelic:
-- **CreateAccount** — three-step flow (exists-check → create → group-add), returns `AlreadyExistsResult` for duplicates
+- **CreateAccount** — two-step flow (exists-check → create), returns `AlreadyExistsResult` for duplicates
 - **Delete** — permanent deletion via `userManagementDeleteUser`; not-found returns success (idempotent)
 - **update_user action** — GlobalAction for profile updates (name, email, userType) via `userManagementUpdateUser`
 - **Test server** — mock NerdGraph endpoint at `cmd/test-server/`
@@ -54,15 +54,13 @@ If not set in config, the `authentication_domain_id` must be supplied per-accoun
 | `email` | Yes | Email (used as login) |
 | `user_type` | Yes | `BASIC_USER_TIER`, `CORE_USER_TIER`, or `FULL_USER_TIER` |
 | `authentication_domain_id` | Yes | Auth domain ID (pre-populated from config if set) |
-| `group_id` | No | Group to add the user to immediately after creation |
 
 ---
 
-## CreateAccount Flow (three steps)
+## CreateAccount Flow (two steps)
 
-1. **Exists check** — `GetUserByEmail` walks paginated `ListUsers`; if found → `AlreadyExistsResult`
+1. **Exists check** — `GetUserByEmail`; if found → `AlreadyExistsResult`
 2. **Create** — `userManagementCreateUser` mutation with `authenticationDomainId`, `email`, `name`, `userType`
-3. **Group-add** — if `group_id` is present in profile, calls `userManagementAddUsersToGroups`
 
 ---
 

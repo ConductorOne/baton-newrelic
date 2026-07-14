@@ -362,16 +362,19 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 		userIDKey:  userId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveGroupMemberMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveGroupMemberMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: remove user from group failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -443,16 +446,19 @@ func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) er
 		roleIDKey:  roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveGroupRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveGroupRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: remove group role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -464,16 +470,19 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 		"groupId":   groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveAccountRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveAccountRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: remove account role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -484,16 +493,19 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		groupIDKey: groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveOrgRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveOrgRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErr(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("baton-newrelic: remove org role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 

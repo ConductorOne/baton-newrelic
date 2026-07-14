@@ -199,6 +199,40 @@ func TestDeleteUser_NotFoundIsSuccess(t *testing.T) {
 	}
 }
 
+// --- T7: RemoveUserFromGroup treats not-found as success (idempotent revoke) ---
+
+func TestRemoveUserFromGroup_NotFoundIsSuccess(t *testing.T) {
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"NOT_FOUND"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(notFoundHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.RemoveUserFromGroup(context.Background(), "group-1", "missing-user"); err != nil {
+		t.Errorf("RemoveUserFromGroup should return nil for not-found, got: %v", err)
+	}
+}
+
+func TestRemoveUserFromGroup_OtherGraphQLErrorSurfaces(t *testing.T) {
+	errHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"permission denied","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(errHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.RemoveUserFromGroup(context.Background(), "group-1", "user-1"); err == nil {
+		t.Error("RemoveUserFromGroup should return error for non-not-found GraphQL errors, got nil")
+	}
+}
+
 // --- ListUsers always returns v2 identity ids (no v1 fallback) ---
 
 func TestListUsers_ReturnsV2IDs(t *testing.T) {
