@@ -112,7 +112,11 @@ func (nr *NewRelic) GlobalActions(ctx context.Context, registry actions.ActionRe
 				DisplayName: "User ID",
 				Description: "The New Relic user ID to update",
 				IsRequired:  true,
-				StringField: &configv1.StringField{},
+				ResourceIdField: configv1.ResourceIdField_builder{
+					Rules: configv1.ResourceIDRules_builder{
+						AllowedResourceTypeIds: []string{"user"},
+					}.Build(),
+				}.Build(),
 			}.Build(),
 			configv1.Field_builder{
 				Name:        "name",
@@ -166,13 +170,11 @@ func (nr *NewRelic) GlobalActions(ctx context.Context, registry actions.ActionRe
 			return nil, nil, fmt.Errorf("baton-newrelic: update_user requires at least one of name, email, or user_type")
 		}
 
-		l.Info("update_user action invoked",
+		l.Debug("update_user action invoked",
 			zap.String(actionArgUserID, userID),
-			zap.String("user_type", userType),
-		)
-		l.Debug("update_user action details",
 			zap.String("name", name),
 			zap.String("email", email),
+			zap.String("user_type", userType),
 		)
 
 		if err := nr.client.UpdateUser(ctx, userID, email, name, userType); err != nil {
