@@ -157,10 +157,11 @@ func (nr *NewRelic) GlobalActions(ctx context.Context, registry actions.ActionRe
 	return registry.Register(ctx, schema, func(ctx context.Context, args *structpb.Struct) (*structpb.Struct, annotations.Annotations, error) {
 		l := ctxzap.Extract(ctx)
 
-		userID, ok := actions.GetStringArg(args, actionArgUserID)
-		if !ok || userID == "" {
+		userResourceID, ok := actions.GetResourceIDArg(args, actionArgUserID)
+		if !ok || userResourceID == nil {
 			return nil, nil, fmt.Errorf("baton-newrelic: update_user action requires user_id")
 		}
+		userID := userResourceID.Resource
 
 		name, _ := actions.GetStringArg(args, "name")
 		email, _ := actions.GetStringArg(args, "email")
