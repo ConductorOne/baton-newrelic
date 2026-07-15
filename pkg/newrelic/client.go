@@ -624,7 +624,7 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 		return err
 	}
 	if len(res.Errors) > 0 {
-		if isNotFoundErr(res.Errors[0]) {
+		if isNotFoundErrStrict(res.Errors[0]) {
 			return nil
 		}
 		return fmt.Errorf("baton-newrelic: delete user failed: %s", res.Errors[0].Message)
@@ -641,9 +641,11 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 // substring match on "could not find the target" cannot distinguish a genuine missing
 // resource from an authorization failure. Idempotent-revoke correctness is prioritized
 // here: treating a permission error as success is considered an acceptable tradeoff
-// compared to surfacing a spurious error on every repeated revoke. If NerdGraph ever
-// returns a distinct errorClass (e.g. "UNAUTHORIZED") for permission failures this
-// branch should be tightened to use errorClass-only matching for those callers.
+// compared to surfacing a spurious error on every repeated revoke.
+//
+// Do NOT use this for DeleteUser — use isNotFoundErrStrict instead. A swallowed
+// permission error on delete means C1 marks an account deprovisioned while the user
+// still has access, which is a security-relevant false negative.
 func isNotFoundErr(e GraphqlError) bool {
 	if class, ok := e.Extensions["errorClass"].(string); ok && class == "NOT_FOUND" {
 		return true
@@ -653,6 +655,16 @@ func isNotFoundErr(e GraphqlError) bool {
 		strings.Contains(lower, "does not exist") ||
 		strings.Contains(lower, "no user") ||
 		strings.Contains(lower, "could not find the target")
+}
+
+// isNotFoundErrStrict reports whether a NerdGraph error has errorClass == "NOT_FOUND".
+// Unlike isNotFoundErr, it does not fall back to message-substring matching.
+// NerdGraph returns errorClass "FORBIDDEN" for permission errors (distinct from
+// "NOT_FOUND"), so a strict check is safe for DELETE paths where a swallowed
+// permission error would be a security-relevant false negative.
+func isNotFoundErrStrict(e GraphqlError) bool {
+	class, ok := e.Extensions["errorClass"].(string)
+	return ok && class == "NOT_FOUND"
 }
 
 // isAlreadyMemberErr reports whether a NerdGraph error represents an "already a member"
@@ -704,7 +716,7 @@ func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey s
 // doReadRequest executes a GraphQL query and tolerates top-level errors alongside
 // partial data. NerdGraph can return usable list data together with non-fatal
 // field-level errors on read/list paths; aborting on any error would discard
-// valid results. For mutations, use doRequest which fails strictly on errors.
+// valid results. For mutations, use doRawRequest with explicit error-array checking.
 //
 // Total failures — NerdGraph HTTP 200 with data=null and a non-empty errors array
 // (e.g. auth/permission denied) — are returned as errors so callers never
@@ -760,57 +772,3 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 	return nil
 }
 
-// doRequest executes a GraphQL query and fails if the response contains any
-// top-level errors. Use for mutations where a GraphQL error must surface as a
-// Go error. For sync/list reads that can return partial data, use doReadRequest.
-func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
-	body := &GraphqlBody{
-		Query:     q,
-		Variables: v,
-	}
-	reqBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal graphql request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		c.baseURL.String(),
-		bytes.NewReader(reqBody),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create http request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("API-Key", c.apikey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var errCheck struct {
-		Errors []GraphqlError `json:"errors"`
-	}
-	if json.Unmarshal(bodyBytes, &errCheck) == nil && len(errCheck.Errors) > 0 {
-		return fmt.Errorf("graphql error: %s", errCheck.Errors[0].Message)
-	}
-
-	if err := json.Unmarshal(bodyBytes, res); err != nil {
-		return fmt.Errorf("failed to decode response body: %w", err)
-	}
-
-	return nil
-}

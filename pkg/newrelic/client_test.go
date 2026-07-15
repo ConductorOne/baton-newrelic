@@ -70,7 +70,7 @@ func TestAddUserToGroup_GraphQLErrorHTTP200(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		// NerdGraph returns HTTP 200 but with a top-level errors array — mutation silently
-		// no-op'd before the doRequest strict-error check was in place.
+		// no-op'd before the explicit error-array check was in place.
 		_, _ = w.Write([]byte(`{"errors":[{"message":"user already in group","extensions":{"errorClass":"BAD_USER_INPUT"}}]}`))
 	})
 	srv := httptest.NewServer(accountsHandler(mutHandler))
@@ -197,6 +197,25 @@ func TestDeleteUser_NotFoundIsSuccess(t *testing.T) {
 
 	if err := client.DeleteUser(context.Background(), "missing-id"); err != nil {
 		t.Errorf("DeleteUser should return nil for not-found, got: %v", err)
+	}
+}
+
+func TestDeleteUser_ForbiddenSurfacesAsError(t *testing.T) {
+	// NerdGraph returns FORBIDDEN even when the message uses NR's ambiguous literal.
+	// DeleteUser must surface this as an error — not silently succeed — so C1 does
+	// not mark an account deprovisioned when it still has access.
+	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.DeleteUser(context.Background(), "user-1"); err == nil {
+		t.Error("DeleteUser should return error for FORBIDDEN, got nil")
 	}
 }
 
