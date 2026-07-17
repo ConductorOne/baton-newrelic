@@ -396,6 +396,73 @@ func TestIsAlreadyExistsErr(t *testing.T) {
 	}
 }
 
+// --- ListGroupMembers returns v2 identity ids (consistent with ListUsers) ---
+//
+// This test documents the consistency invariant: both ListUsers and
+// ListGroupMembers return the v2 identity id. If one returned v1 and the other
+// v2, grant principals from Grants() would never resolve to user resources from
+// List(), making every group-membership grant permanently dangling.
+
+func TestListGroupMembers_ReturnsV2IDs(t *testing.T) {
+	const wantUserID = "v2-identity-abc"
+
+	memberHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": map[string]interface{}{
+				"actor": map[string]interface{}{
+					"organization": map[string]interface{}{
+						"userManagement": map[string]interface{}{
+							"authenticationDomains": map[string]interface{}{
+								"authenticationDomains": []interface{}{
+									map[string]interface{}{
+										"id":   "dom-1",
+										"name": "Domain 1",
+										"groups": map[string]interface{}{
+											"nextCursor": nil,
+											"totalCount": 1,
+											"groups": []interface{}{
+												map[string]interface{}{
+													"id":          "grp-1",
+													"displayName": "Group 1",
+													"users": map[string]interface{}{
+														"nextCursor": nil,
+														"totalCount": 1,
+														"users": []interface{}{
+															// id field is the v2 identity id — same namespace
+															// as what ListUsers returns via usersQueryV2.
+															map[string]interface{}{"id": wantUserID},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	})
+	srv := httptest.NewServer(accountsHandler(memberHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	members, _, err := client.ListGroupMembers(context.Background(), "dom-1", "grp-1", "")
+	if err != nil {
+		t.Fatalf("ListGroupMembers: %v", err)
+	}
+	if len(members) != 1 {
+		t.Fatalf("expected 1 member, got %d", len(members))
+	}
+	if members[0] != wantUserID {
+		t.Errorf("member ID = %q, want %q (v2 identity id, same namespace as ListUsers)", members[0], wantUserID)
+	}
+}
+
 // --- ListAllDomains follows the domain cursor across pages ---
 
 func TestListAllDomains_FollowsCursor(t *testing.T) {

@@ -124,10 +124,20 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 	return accounts[0].ID, nil
 }
 
-// ListUsers returns users across the organization via the NerdGraph v2
-// user-management query. Resource IDs are always v2 identity ids (required by
-// userManagementDeleteUser and other mutations), including when zero or multiple
-// authentication domains exist.
+// ListUsers returns users via the NerdGraph v2 userManagement query.
+//
+// Resource IDs are always the v2 identity `id` — never the legacy v1 `userId`
+// from the deprecated `users.userSearch` API. Two invariants require this:
+//
+//  1. Mutations (userManagementDeleteUser, userManagementUpdateUser,
+//     userManagementAddUsersToGroups, etc.) only accept v2 identity IDs.
+//
+//  2. Consistency with ListGroupMembers: the groupMembersQuery also uses the
+//     v2 `userManagement` API and returns `id` (v2 identity id) for each
+//     group member. Grants() in groups.go uses those IDs as grant-principal
+//     resource IDs. If ListUsers returned v1 IDs instead, user resources and
+//     grant principals would never match — every grant would be permanently
+//     dangling. (This was the pre-PR state for multi-domain orgs.)
 func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
 	var resV2 UsersResponseV2
 	variables := map[string]interface{}{}
