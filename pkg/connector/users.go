@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
@@ -79,7 +80,11 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 
 	rawCursor := bag.PageToken()
 
-	// Decode cursor: either a plain string (single-domain) or JSON multiDomainState.
+	// Pagination state is always carried as a JSON multiDomainState: on the first
+	// call we enumerate every authentication domain once and cache their IDs in the
+	// cursor. Caching means ListDomains runs a single time per sync (not per user
+	// page), and each domain is paged independently because NerdGraph user cursors
+	// are domain-specific.
 	var mds *multiDomainState
 	if len(rawCursor) > 0 && rawCursor[0] == '{' {
 		var s multiDomainState
@@ -87,49 +92,34 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 			return nil, nil, fmt.Errorf("baton-newrelic: invalid pagination cursor: %w", err)
 		}
 		mds = &s
-	}
-
-	var domainID, userCursor string
-
-	if mds != nil {
-		// Resuming a multi-domain sync: use stored domain list and cursor.
-		// DomainIdx >= len is a defensive guard; the cursor-marshal logic below never
-		// encodes an out-of-range index, so this branch is unreachable in normal flow.
-		if mds.DomainIdx >= len(mds.DomainIDs) {
-			next, err := bag.NextToken("")
-			if err != nil {
-				return nil, nil, err
-			}
-			return nil, &resource.SyncOpResults{NextPageToken: next}, nil
-		}
-		domainID = mds.DomainIDs[mds.DomainIdx]
-		userCursor = mds.UserCursor
 	} else {
-		// First call or single-domain continuation: discover domains (they are few
-		// and always fit in one NerdGraph page, so no domain cursor is needed).
-		domains, _, err := u.client.ListDomains(ctx, "")
+		// First call: enumerate ALL authentication domains, following the domain
+		// cursor so orgs with more domains than fit on one page aren't dropped.
+		domains, err := u.client.ListAllDomains(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		switch len(domains) {
-		case 0:
+		if len(domains) == 0 {
 			return nil, nil, nil
-		case 1:
-			domainID = domains[0].ID
-			userCursor = rawCursor // plain cursor is safe for a single domain
-		default:
-			// Multiple domains: initialize per-domain pagination.
-			// NerdGraph cursors are domain-specific; a shared cursor would be
-			// mis-applied to every domain after the first page.
-			ids := make([]string, len(domains))
-			for i, d := range domains {
-				ids[i] = d.ID
-			}
-			mds = &multiDomainState{DomainIDs: ids}
-			domainID = ids[0]
-			userCursor = ""
 		}
+		ids := make([]string, len(domains))
+		for i, d := range domains {
+			ids[i] = d.ID
+		}
+		mds = &multiDomainState{DomainIDs: ids}
 	}
+
+	// DomainIdx >= len is a defensive guard; the cursor-marshal logic below never
+	// encodes an out-of-range index, so this branch is unreachable in normal flow.
+	if mds.DomainIdx >= len(mds.DomainIDs) {
+		next, err := bag.NextToken("")
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, &resource.SyncOpResults{NextPageToken: next}, nil
+	}
+	domainID := mds.DomainIDs[mds.DomainIdx]
+	userCursor := mds.UserCursor
 
 	users, nextUserCursor, err := u.client.ListUsers(ctx, domainID, userCursor)
 	if err != nil {
@@ -137,31 +127,27 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 	}
 
 	var nextCursorStr string
-	if mds != nil {
-		switch {
-		case nextUserCursor != "":
-			b, merr := json.Marshal(multiDomainState{
-				DomainIDs:  mds.DomainIDs,
-				DomainIdx:  mds.DomainIdx,
-				UserCursor: nextUserCursor,
-			})
-			if merr != nil {
-				return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
-			}
-			nextCursorStr = string(b)
-		case mds.DomainIdx+1 < len(mds.DomainIDs):
-			b, merr := json.Marshal(multiDomainState{
-				DomainIDs: mds.DomainIDs,
-				DomainIdx: mds.DomainIdx + 1,
-			})
-			if merr != nil {
-				return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
-			}
-			nextCursorStr = string(b)
-			// default: all domains exhausted → nextCursorStr = "" signals completion
+	switch {
+	case nextUserCursor != "":
+		b, merr := json.Marshal(multiDomainState{
+			DomainIDs:  mds.DomainIDs,
+			DomainIdx:  mds.DomainIdx,
+			UserCursor: nextUserCursor,
+		})
+		if merr != nil {
+			return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
 		}
-	} else {
-		nextCursorStr = nextUserCursor
+		nextCursorStr = string(b)
+	case mds.DomainIdx+1 < len(mds.DomainIDs):
+		b, merr := json.Marshal(multiDomainState{
+			DomainIDs: mds.DomainIDs,
+			DomainIdx: mds.DomainIdx + 1,
+		})
+		if merr != nil {
+			return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
+		}
+		nextCursorStr = string(b)
+		// default: all domains exhausted → nextCursorStr = "" signals completion
 	}
 
 	next, err := bag.NextToken(nextCursorStr)
@@ -252,13 +238,19 @@ func (u *userBuilder) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires authentication_domain_id")
 	}
 
+	// Best-effort parent link: users are child resources of the org (see
+	// organizations.go), so mirror the parent the same user would receive from a
+	// normal sync. If the org lookup fails we still return the created/existing user
+	// without the parent link, which the next full sync repairs.
+	parentID := u.orgParentID(ctx)
+
 	// Step 1: check if user already exists.
 	existing, err := u.client.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to check for existing user: %w", err)
 	}
 	if existing != nil {
-		existingResource, err := userResource(ctx, nil, existing)
+		existingResource, err := userResource(ctx, parentID, existing)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to build existing user resource: %w", err)
 		}
@@ -270,6 +262,21 @@ func (u *userBuilder) CreateAccount(
 	// Step 2: create the user.
 	newUserID, err := u.client.CreateUser(ctx, authDomainID, email, name, userType)
 	if err != nil {
+		// A concurrent CreateAccount for the same email (or a user in a domain the
+		// pre-check didn't surface) races here: NerdGraph rejects the duplicate.
+		// Re-resolve by email and report AlreadyExists instead of a hard error.
+		if errors.Is(err, newrelic.ErrUserAlreadyExists) {
+			if existing, gErr := u.client.GetUserByEmail(ctx, email); gErr == nil && existing != nil {
+				existingResource, rErr := userResource(ctx, parentID, existing)
+				if rErr != nil {
+					return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to build existing user resource: %w", rErr)
+				}
+				return &v2.CreateAccountResponse_AlreadyExistsResult{
+					Resource: existingResource,
+				}, nil, nil, nil
+			}
+			return &v2.CreateAccountResponse_AlreadyExistsResult{}, nil, nil, nil
+		}
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to create user: %w", err)
 	}
 
@@ -278,7 +285,7 @@ func (u *userBuilder) CreateAccount(
 		Email: email,
 		Name:  name,
 	}
-	newResource, err := userResource(ctx, nil, newUser)
+	newResource, err := userResource(ctx, parentID, newUser)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to build new user resource: %w", err)
 	}
@@ -286,6 +293,16 @@ func (u *userBuilder) CreateAccount(
 	return &v2.CreateAccountResponse_SuccessResult{
 		Resource: newResource,
 	}, nil, nil, nil
+}
+
+// orgParentID returns the org resource ID that users hang off of, or nil if the
+// org lookup fails (the link is best-effort and self-heals on the next sync).
+func (u *userBuilder) orgParentID(ctx context.Context) *v2.ResourceId {
+	org, err := u.client.GetOrg(ctx)
+	if err != nil || org == nil {
+		return nil
+	}
+	return &v2.ResourceId{ResourceType: orgResourceType.Id, Resource: org.ID}
 }
 
 // Delete permanently removes a user. Returns success if the user is not found (idempotent).

@@ -444,15 +444,6 @@ type ListBase struct {
 	Total      int    `json:"totalCount"`
 }
 
-type UsersResponse = QueryResponse[struct {
-	Users struct {
-		Search struct {
-			ListBase
-			Users []User `json:"users"`
-		} `json:"userSearch"`
-	} `json:"users"`
-}]
-
 type UsersResponseV2 = QueryResponse[struct {
 	Organization struct {
 		UserManagement struct {

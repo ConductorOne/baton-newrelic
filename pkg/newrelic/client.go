@@ -18,6 +18,10 @@ var ErrAlreadyMember = errors.New("user already a member of group")
 // ErrNotMember is returned by RemoveUserFromGroup when the user is not in the group.
 var ErrNotMember = errors.New("user not a member of group")
 
+// ErrUserAlreadyExists is returned by CreateUser when a user with the same email
+// already exists (e.g. a race between the existence check and creation).
+var ErrUserAlreadyExists = errors.New("user with email already exists")
+
 const (
 	BaseHost        = "api.newrelic.com"
 	GraphQHEndpoint = "/graphql"
@@ -260,6 +264,26 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 	}
 
 	return ad, nextDomains, nil
+}
+
+// ListAllDomains enumerates every authentication domain, following the domain
+// cursor so orgs with more domains than fit on a single NerdGraph page are not
+// silently dropped.
+func (c *Client) ListAllDomains(ctx context.Context) ([]Domain, error) {
+	var all []Domain
+	cursor := ""
+	for {
+		domains, next, err := c.ListDomains(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, domains...)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return all, nil
 }
 
 // ListGroups returns groups with roles under specific domain.
@@ -569,6 +593,9 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 	}
 
 	if len(res.Errors) > 0 {
+		if isAlreadyExistsErr(res.Errors[0]) {
+			return "", ErrUserAlreadyExists
+		}
 		return "", fmt.Errorf("baton-newrelic: create user failed: %s", res.Errors[0].Message)
 	}
 
@@ -683,6 +710,23 @@ func isAlreadyMemberErr(e GraphqlError) bool {
 		strings.Contains(lower, "duplicate")
 }
 
+// isAlreadyExistsErr reports whether a NerdGraph error indicates the user/email
+// already exists. CreateAccount treats this as an AlreadyExists condition so that
+// a race between the existence check and creation doesn't surface as a hard error.
+func isAlreadyExistsErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok {
+		switch class {
+		case "DUPLICATE", "ALREADY_EXISTS", "CONFLICT":
+			return true
+		}
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "already exists") ||
+		strings.Contains(lower, "already registered") ||
+		strings.Contains(lower, "duplicate") ||
+		strings.Contains(lower, "email is taken")
+}
+
 func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
@@ -771,4 +815,3 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 	}
 	return nil
 }
-

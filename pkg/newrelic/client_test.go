@@ -339,3 +339,89 @@ func TestListUsers_ReturnsV2IDs(t *testing.T) {
 	}
 }
 
+// --- CreateUser: duplicate email is classified as ErrUserAlreadyExists ---
+
+func TestCreateUser_DuplicateEmailReturnsErrUserAlreadyExists(t *testing.T) {
+	mutHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// NerdGraph rejects a duplicate email with HTTP 200 + a top-level errors array.
+		_, _ = w.Write([]byte(`{"errors":[{"message":"user with email bob@example.com already exists"}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(mutHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+	_, err := client.CreateUser(context.Background(), "domain-1", "bob@example.com", "Bob", "FULL_USER_TIER")
+	if !errors.Is(err, ErrUserAlreadyExists) {
+		t.Fatalf("expected ErrUserAlreadyExists, got %v", err)
+	}
+}
+
+func TestCreateUser_OtherGraphQLErrorSurfaces(t *testing.T) {
+	mutHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"invalid user type","extensions":{"errorClass":"BAD_USER_INPUT"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(mutHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+	_, err := client.CreateUser(context.Background(), "domain-1", "bob@example.com", "Bob", "NOPE")
+	if err == nil {
+		t.Fatal("expected error for non-duplicate GraphQL error")
+	}
+	if errors.Is(err, ErrUserAlreadyExists) {
+		t.Fatal("non-duplicate error must not be classified as ErrUserAlreadyExists")
+	}
+}
+
+func TestIsAlreadyExistsErr(t *testing.T) {
+	yes := []GraphqlError{
+		{Message: "email already exists"},
+		{Message: "that address is already registered"},
+		{Message: "duplicate key"},
+		{Message: "whatever", Extensions: map[string]interface{}{"errorClass": "DUPLICATE"}},
+		{Message: "whatever", Extensions: map[string]interface{}{"errorClass": "ALREADY_EXISTS"}},
+	}
+	for _, e := range yes {
+		if !isAlreadyExistsErr(e) {
+			t.Errorf("expected isAlreadyExistsErr true for %+v", e)
+		}
+	}
+	no := GraphqlError{Message: "permission denied", Extensions: map[string]interface{}{"errorClass": "FORBIDDEN"}}
+	if isAlreadyExistsErr(no) {
+		t.Errorf("expected isAlreadyExistsErr false for %+v", no)
+	}
+}
+
+// --- ListAllDomains follows the domain cursor across pages ---
+
+func TestListAllDomains_FollowsCursor(t *testing.T) {
+	page := 0
+	domHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if page == 0 {
+			page++
+			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":{"authenticationDomains":{"nextCursor":"c2","totalCount":2,"authenticationDomains":[{"id":"d1","name":"D1","groups":{"totalCount":0}}]}}}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":{"authenticationDomains":{"nextCursor":"","totalCount":2,"authenticationDomains":[{"id":"d2","name":"D2","groups":{"totalCount":0}}]}}}}}}`))
+	})
+	srv := httptest.NewServer(accountsHandler(domHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+	domains, err := client.ListAllDomains(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllDomains: %v", err)
+	}
+	if len(domains) != 2 {
+		t.Fatalf("expected 2 domains across 2 pages, got %d", len(domains))
+	}
+	if domains[0].ID != "d1" || domains[1].ID != "d2" {
+		t.Errorf("unexpected domain ids: %q, %q", domains[0].ID, domains[1].ID)
+	}
+}
