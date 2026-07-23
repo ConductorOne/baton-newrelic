@@ -5,13 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/conductorone/baton-newrelic/pkg/newrelic"
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
+	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// stringField returns the string value of a profile field, or "" if the
+// profile or the field is unset. GetFields/GetStringValue are nil-safe, so
+// this is safe to call with a nil profile.
+func stringField(profile *structpb.Struct, key string) string {
+	return profile.GetFields()[key].GetStringValue()
+}
 
 const (
 	profileEmail  = "email"
@@ -22,6 +31,7 @@ type userBuilder struct {
 	resourceType           *v2.ResourceType
 	client                 *newrelic.Client
 	authenticationDomainID string
+	orgParentIDCache       atomic.Pointer[v2.ResourceId]
 }
 
 // multiDomainState is JSON-encoded as the pagination cursor when an org has more
@@ -126,28 +136,29 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 		return nil, nil, err
 	}
 
-	var nextCursorStr string
+	var nextState *multiDomainState
 	switch {
 	case nextUserCursor != "":
-		b, merr := json.Marshal(multiDomainState{
+		nextState = &multiDomainState{
 			DomainIDs:  mds.DomainIDs,
 			DomainIdx:  mds.DomainIdx,
 			UserCursor: nextUserCursor,
-		})
-		if merr != nil {
-			return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
 		}
-		nextCursorStr = string(b)
 	case mds.DomainIdx+1 < len(mds.DomainIDs):
-		b, merr := json.Marshal(multiDomainState{
+		nextState = &multiDomainState{
 			DomainIDs: mds.DomainIDs,
 			DomainIdx: mds.DomainIdx + 1,
-		})
+		}
+		// default: all domains exhausted → nextState stays nil, nextCursorStr = "" signals completion
+	}
+
+	var nextCursorStr string
+	if nextState != nil {
+		b, merr := json.Marshal(nextState)
 		if merr != nil {
 			return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
 		}
 		nextCursorStr = string(b)
-		// default: all domains exhausted → nextCursorStr = "" signals completion
 	}
 
 	next, err := bag.NextToken(nextCursorStr)
@@ -198,12 +209,7 @@ func (u *userBuilder) CreateAccount(
 ) (connectorbuilder.CreateAccountResponse, []*v2.PlaintextData, annotations.Annotations, error) {
 	profile := accountInfo.GetProfile()
 
-	email := ""
-	if profile != nil {
-		if v, ok := profile.GetFields()["email"]; ok {
-			email = v.GetStringValue()
-		}
-	}
+	email := stringField(profile, "email")
 	if email == "" {
 		email = accountInfo.GetLogin()
 	}
@@ -211,28 +217,19 @@ func (u *userBuilder) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires an email address")
 	}
 
-	var name string
-	if profile != nil {
-		if v, ok := profile.GetFields()["name"]; ok {
-			name = v.GetStringValue()
-		}
-	}
+	name := stringField(profile, "name")
 	if name == "" {
 		name = email
 	}
 
-	userType := "FULL_USER_TIER"
-	if profile != nil {
-		if v, ok := profile.GetFields()["user_type"]; ok && v.GetStringValue() != "" {
-			userType = v.GetStringValue()
-		}
+	userType := stringField(profile, "user_type")
+	if userType == "" {
+		userType = "FULL_USER_TIER"
 	}
 
-	authDomainID := u.authenticationDomainID
-	if profile != nil {
-		if v, ok := profile.GetFields()["authentication_domain_id"]; ok && v.GetStringValue() != "" {
-			authDomainID = v.GetStringValue()
-		}
+	authDomainID := stringField(profile, "authentication_domain_id")
+	if authDomainID == "" {
+		authDomainID = u.authenticationDomainID
 	}
 	if authDomainID == "" {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires authentication_domain_id")
@@ -297,12 +294,19 @@ func (u *userBuilder) CreateAccount(
 
 // orgParentID returns the org resource ID that users hang off of, or nil if the
 // org lookup fails (the link is best-effort and self-heals on the next sync).
+// The org ID is invariant for the lifetime of the builder, so a successful
+// lookup is cached to avoid a redundant GetOrg round-trip on every CreateAccount.
 func (u *userBuilder) orgParentID(ctx context.Context) *v2.ResourceId {
+	if cached := u.orgParentIDCache.Load(); cached != nil {
+		return cached
+	}
 	org, err := u.client.GetOrg(ctx)
 	if err != nil || org == nil {
 		return nil
 	}
-	return &v2.ResourceId{ResourceType: orgResourceType.Id, Resource: org.ID}
+	rid := &v2.ResourceId{ResourceType: orgResourceType.Id, Resource: org.ID}
+	u.orgParentIDCache.Store(rid)
+	return rid
 }
 
 // Delete permanently removes a user. Returns success if the user is not found (idempotent).
