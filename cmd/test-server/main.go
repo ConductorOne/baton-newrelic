@@ -331,6 +331,43 @@ func (s *store) handleUsersQueryV2() interface{} {
 	})
 }
 
+func (s *store) handleGetUserByEmailQuery(vars map[string]interface{}) interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	email, _ := vars[keyEmail].(string)
+
+	userList := make([]map[string]interface{}, 0, 1)
+	for _, u := range s.users {
+		if strings.EqualFold(u.Email, email) {
+			userList = append(userList, map[string]interface{}{
+				keyID:    u.ID,
+				keyEmail: u.Email,
+				keyName:  u.Name,
+			})
+			break
+		}
+	}
+
+	return gqlOK(map[string]interface{}{
+		keyActor: map[string]interface{}{
+			keyOrganization: map[string]interface{}{
+				keyUserMgmt: map[string]interface{}{
+					keyAuthDomains: map[string]interface{}{
+						keyAuthDomains: []map[string]interface{}{
+							{
+								keyUsers: map[string]interface{}{
+									keyUsers: userList,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func (s *store) handleDomainsQuery() interface{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -561,6 +598,8 @@ func (s *store) dispatch(req gqlRequest) interface{} {
 		return s.handleUsersQuery()
 	case strings.Contains(q, "GetOrg"):
 		return handleOrgQuery()
+	case strings.Contains(q, "GetUserByEmail"):
+		return s.handleGetUserByEmailQuery(vars)
 	case strings.Contains(q, "ListRoles"):
 		return handleRolesQuery()
 	case strings.Contains(q, "ListDomains"):
