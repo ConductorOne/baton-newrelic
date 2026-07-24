@@ -2,7 +2,6 @@ package connector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -11,6 +10,7 @@ import (
 	v2 "github.com/conductorone/baton-sdk/pb/c1/connector/v2"
 	"github.com/conductorone/baton-sdk/pkg/annotations"
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
+	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -32,15 +32,6 @@ type userBuilder struct {
 	client                 *newrelic.Client
 	authenticationDomainID string
 	orgParentIDCache       atomic.Pointer[v2.ResourceId]
-}
-
-// multiDomainState is JSON-encoded as the pagination cursor when an org has more
-// than one authentication domain. Cursors in NerdGraph are domain-specific, so
-// we must paginate each domain's users independently.
-type multiDomainState struct {
-	DomainIDs  []string `json:"dids"`
-	DomainIdx  int      `json:"didx"`
-	UserCursor string   `json:"uc,omitempty"`
 }
 
 func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -78,90 +69,51 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 
 // List returns all the users from the database as resource objects.
 // Users include a UserTrait because they are the 'shape' of a standard user.
+//
+// Pagination uses the SDK Bag to page each authentication domain as its own
+// phase, replacing the previous hand-rolled JSON cursor.
 func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId, opts resource.SyncOpAttrs) ([]*v2.Resource, *resource.SyncOpResults, error) {
 	if parentResourceID == nil {
 		return nil, nil, nil
 	}
 
-	bag, err := parsePageToken(opts.PageToken.Token, &v2.ResourceId{ResourceType: userResourceType.Id})
-	if err != nil {
-		return nil, nil, err
+	bag := &pagination.Bag{}
+	if err := bag.Unmarshal(opts.PageToken.Token); err != nil {
+		return nil, nil, fmt.Errorf("baton-newrelic: invalid pagination cursor: %w", err)
 	}
 
-	rawCursor := bag.PageToken()
-
-	// Pagination state is always carried as a JSON multiDomainState: on the first
-	// call we enumerate every authentication domain once and cache their IDs in the
-	// cursor. Caching means ListDomains runs a single time per sync (not per user
-	// page), and each domain is paged independently because NerdGraph user cursors
-	// are domain-specific.
-	var mds *multiDomainState
-	if len(rawCursor) > 0 && rawCursor[0] == '{' {
-		var s multiDomainState
-		if err := json.Unmarshal([]byte(rawCursor), &s); err != nil {
-			return nil, nil, fmt.Errorf("baton-newrelic: invalid pagination cursor: %w", err)
-		}
-		mds = &s
-	} else {
-		// First call: enumerate ALL authentication domains, following the domain
-		// cursor so orgs with more domains than fit on one page aren't dropped.
+	// First call: enumerate every authentication domain once and push one
+	// pagination phase per domain. NerdGraph user cursors are domain-specific, so
+	// each domain is paged independently as its own phase; the Bag advances to the
+	// next domain automatically once a domain's users are exhausted. The domain IDs
+	// live in the marshaled token, so ListAllDomains runs a single time per sync.
+	if bag.Current() == nil {
 		domains, err := u.client.ListAllDomains(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(domains) == 0 {
+		for _, d := range domains {
+			bag.Push(pagination.PageState{
+				ResourceTypeID: userResourceType.Id,
+				ResourceID:     d.ID,
+			})
+		}
+		// No authentication domains → nothing to sync.
+		if bag.Current() == nil {
 			return nil, nil, nil
 		}
-		ids := make([]string, len(domains))
-		for i, d := range domains {
-			ids[i] = d.ID
-		}
-		mds = &multiDomainState{DomainIDs: ids}
 	}
 
-	// DomainIdx >= len is a defensive guard; the cursor-marshal logic below never
-	// encodes an out-of-range index, so this branch is unreachable in normal flow.
-	if mds.DomainIdx >= len(mds.DomainIDs) {
-		next, err := bag.NextToken("")
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, &resource.SyncOpResults{NextPageToken: next}, nil
-	}
-	domainID := mds.DomainIDs[mds.DomainIdx]
-	userCursor := mds.UserCursor
-
-	users, nextUserCursor, err := u.client.ListUsers(ctx, domainID, userCursor)
+	domainID := bag.ResourceID()
+	users, nextUserCursor, err := u.client.ListUsers(ctx, domainID, bag.PageToken())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var nextState *multiDomainState
-	switch {
-	case nextUserCursor != "":
-		nextState = &multiDomainState{
-			DomainIDs:  mds.DomainIDs,
-			DomainIdx:  mds.DomainIdx,
-			UserCursor: nextUserCursor,
-		}
-	case mds.DomainIdx+1 < len(mds.DomainIDs):
-		nextState = &multiDomainState{
-			DomainIDs: mds.DomainIDs,
-			DomainIdx: mds.DomainIdx + 1,
-		}
-		// default: all domains exhausted → nextState stays nil, nextCursorStr = "" signals completion
-	}
-
-	var nextCursorStr string
-	if nextState != nil {
-		b, merr := json.Marshal(nextState)
-		if merr != nil {
-			return nil, nil, fmt.Errorf("baton-newrelic: failed to marshal pagination cursor: %w", merr)
-		}
-		nextCursorStr = string(b)
-	}
-
-	next, err := bag.NextToken(nextCursorStr)
+	// nextUserCursor != "" keeps the current domain on the stack with the new
+	// cursor; "" pops it and advances to the next domain (or ends the sync once the
+	// last domain is popped).
+	next, err := bag.NextToken(nextUserCursor)
 	if err != nil {
 		return nil, nil, err
 	}

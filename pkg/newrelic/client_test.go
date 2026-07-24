@@ -472,10 +472,14 @@ func TestListAllDomains_FollowsCursor(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		if page == 0 {
 			page++
-			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":{"authenticationDomains":{"nextCursor":"c2","totalCount":2,"authenticationDomains":[{"id":"d1","name":"D1","groups":{"totalCount":0}}]}}}}}}`))
+			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":` +
+				`{"authenticationDomains":{"nextCursor":"c2","totalCount":2,` +
+				`"authenticationDomains":[{"id":"d1","name":"D1","groups":{"totalCount":0}}]}}}}}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":{"authenticationDomains":{"nextCursor":"","totalCount":2,"authenticationDomains":[{"id":"d2","name":"D2","groups":{"totalCount":0}}]}}}}}}`))
+		_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"authorizationManagement":` +
+			`{"authenticationDomains":{"nextCursor":"","totalCount":2,` +
+			`"authenticationDomains":[{"id":"d2","name":"D2","groups":{"totalCount":0}}]}}}}}}`))
 	})
 	srv := httptest.NewServer(accountsHandler(domHandler))
 	defer srv.Close()
