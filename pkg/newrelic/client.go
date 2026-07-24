@@ -148,7 +148,7 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 		variables["domainId"] = domainId
 	}
 
-	if err := c.getResponse(ctx, composeUsersQueryV2, variables, &resV2); err != nil {
+	if err := c.doReadRequest(ctx, composeUsersQueryV2(), variables, &resV2); err != nil {
 		return nil, "", err
 	}
 
@@ -170,10 +170,6 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 	}
 
 	return users, nextCursor, nil
-}
-
-func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {
-	return c.doReadRequest(ctx, query(), variables, &res)
 }
 
 // GetOrg returns organization details.
@@ -391,7 +387,7 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 		if isAlreadyMemberErr(res.Errors[0]) {
 			return ErrAlreadyMember
 		}
-		return fmt.Errorf("baton-newrelic: add user to group failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("add user to group failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -414,7 +410,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 		if isNotFoundErr(res.Errors[0]) {
 			return ErrNotMember
 		}
-		return fmt.Errorf("baton-newrelic: remove user from group failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("remove user from group failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -437,7 +433,7 @@ func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error
 		if isAlreadyMemberErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: add group role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("add group role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -461,7 +457,7 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 		if isAlreadyMemberErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: add account role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("add account role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -484,7 +480,7 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 		if isAlreadyMemberErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: add org role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("add org role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -507,7 +503,7 @@ func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) er
 		if isNotFoundErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: remove group role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("remove group role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -531,7 +527,7 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 		if isNotFoundErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: remove account role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("remove account role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -554,7 +550,7 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		if isNotFoundErr(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: remove org role failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("remove org role failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -569,10 +565,10 @@ func (c *Client) GetUserByEmail(ctx context.Context, email string) (*User, error
 		Variables: map[string]interface{}{emailKey: email},
 	}
 	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
-		return nil, fmt.Errorf("baton-newrelic: GetUserByEmail request failed: %w", err)
+		return nil, fmt.Errorf("GetUserByEmail request failed: %w", err)
 	}
 	if len(res.Errors) > 0 {
-		return nil, fmt.Errorf("baton-newrelic: GetUserByEmail failed: %s", res.Errors[0].Message)
+		return nil, fmt.Errorf("GetUserByEmail failed: %s", res.Errors[0].Message)
 	}
 	for _, domain := range res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
 		for _, u := range domain.Users.Users {
@@ -606,7 +602,7 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 		if isAlreadyExistsErr(res.Errors[0]) {
 			return "", ErrUserAlreadyExists
 		}
-		return "", fmt.Errorf("baton-newrelic: create user failed: %s", res.Errors[0].Message)
+		return "", fmt.Errorf("create user failed: %s", res.Errors[0].Message)
 	}
 
 	return res.Data.UserManagementCreateUser.CreatedUser.ID, nil
@@ -641,7 +637,7 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 		return err
 	}
 	if len(res.Errors) > 0 {
-		return fmt.Errorf("baton-newrelic: update user failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("update user failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -664,7 +660,7 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 		if isNotFoundErrStrict(res.Errors[0]) {
 			return nil
 		}
-		return fmt.Errorf("baton-newrelic: delete user failed: %s", res.Errors[0].Message)
+		return fmt.Errorf("delete user failed: %s", res.Errors[0].Message)
 	}
 	return nil
 }
@@ -737,15 +733,19 @@ func isAlreadyExistsErr(e GraphqlError) bool {
 		strings.Contains(lower, "email is taken")
 }
 
-func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
+// sendGraphqlRequest marshals and POSTs a GraphQL request, and returns the raw
+// response body on a 200 status. Shared by doRawRequest and doReadRequest,
+// which differ only in how they interpret the body (see doReadRequest's
+// partial-error tolerance).
+func sendGraphqlRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody) ([]byte, error) {
 	reqBody, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("failed to marshal graphql request: %w", err)
+		return nil, fmt.Errorf("failed to marshal graphql request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(reqBody))
 	if err != nil {
-		return fmt.Errorf("failed to create http request: %w", err)
+		return nil, fmt.Errorf("failed to create http request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -753,15 +753,27 @@ func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey s
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return bodyBytes, nil
+}
+
+func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
+	bodyBytes, err := sendGraphqlRequest(ctx, httpClient, rawURL, apikey, body)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(bodyBytes, res); err != nil {
 		return fmt.Errorf("failed to decode graphql response: %w", err)
 	}
 	return nil
@@ -780,48 +792,30 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 		Query:     q,
 		Variables: v,
 	}
-	reqBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal graphql request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL.String(), bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("failed to create http request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("API-Key", c.apikey)
-
-	resp, err := c.httpClient.Do(req)
+	bodyBytes, err := sendGraphqlRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body)
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Detect total failure: data=null with errors present. Partial-data responses
-	// (data != null alongside errors) are tolerated on read paths.
-	var raw struct {
-		Data   json.RawMessage `json:"data"`
-		Errors []GraphqlError  `json:"errors"`
-	}
-	if json.Unmarshal(bodyBytes, &raw) == nil && len(raw.Errors) > 0 {
-		if len(raw.Data) == 0 || string(raw.Data) == "null" {
-			return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
-		}
 	}
 
 	if err := json.Unmarshal(bodyBytes, res); err != nil {
 		return fmt.Errorf("failed to decode response body: %w", err)
 	}
+
+	// Only probe for a total-failure response (data=null with errors present) when
+	// the body actually contains an "errors" key — avoids a second full unmarshal
+	// of bodyBytes on the common error-free path. Partial-data responses (data !=
+	// null alongside errors) are tolerated on read paths.
+	if bytes.Contains(bodyBytes, []byte(`"errors"`)) {
+		var raw struct {
+			Data   json.RawMessage `json:"data"`
+			Errors []GraphqlError  `json:"errors"`
+		}
+		if json.Unmarshal(bodyBytes, &raw) == nil && len(raw.Errors) > 0 {
+			if len(raw.Data) == 0 || string(raw.Data) == "null" {
+				return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
+			}
+		}
+	}
+
 	return nil
 }

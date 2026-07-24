@@ -236,12 +236,12 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 
 	if principal.Id.ResourceType != groupResourceType.Id {
 		l.Warn(
-			"newrelic-connector: only groups can be granted role membership",
+			"baton-newrelic: only groups can be granted role membership",
 			zap.String("principal_id", principal.Id.String()),
 			zap.String("principal_type", principal.Id.ResourceType),
 		)
 
-		return nil, fmt.Errorf("newrelic-connector: only groups can be granted role membership")
+		return nil, fmt.Errorf("baton-newrelic: only groups can be granted role membership")
 	}
 
 	// check if principal is valid in regards to scope of role entitlement
@@ -264,11 +264,11 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	case groupScope:
 		err = r.client.AddGroupRole(ctx, roleId, groupId)
 	default:
-		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+		return nil, fmt.Errorf("baton-newrelic: role scope %s is not supported", roleScope)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("newrelic-connector: failed to add role to group: %w", err)
+		return nil, fmt.Errorf("baton-newrelic: failed to add role to group: %w", err)
 	}
 
 	return nil, nil
@@ -282,12 +282,12 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 
 	if principal.Id.ResourceType != groupResourceType.Id {
 		l.Warn(
-			"newrelic-connector: only groups can have role membership revoked",
+			"baton-newrelic: only groups can have role membership revoked",
 			zap.String("principal_id", principal.Id.String()),
 			zap.String("principal_type", principal.Id.ResourceType),
 		)
 
-		return nil, fmt.Errorf("newrelic-connector: only groups can have role membership revoked")
+		return nil, fmt.Errorf("baton-newrelic: only groups can have role membership revoked")
 	}
 
 	// check if principal is valid in regards to scope of role entitlement
@@ -310,11 +310,11 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	case groupScope:
 		err = r.client.RemoveGroupRole(ctx, roleId, groupId)
 	default:
-		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+		return nil, fmt.Errorf("baton-newrelic: role scope %s is not supported", roleScope)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("newrelic-connector: failed to remove role from group: %w", err)
+		return nil, fmt.Errorf("baton-newrelic: failed to remove role from group: %w", err)
 	}
 
 	return nil, nil

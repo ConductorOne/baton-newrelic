@@ -93,7 +93,7 @@ func (nr *NewRelic) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 func (nr *NewRelic) Validate(ctx context.Context) (annotations.Annotations, error) {
 	_, err := nr.client.GetOrg(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("newrelic-connector: failed to retrieve org: %w", err)
+		return nil, fmt.Errorf("baton-newrelic: failed to retrieve org: %w", err)
 	}
 
 	return nil, nil

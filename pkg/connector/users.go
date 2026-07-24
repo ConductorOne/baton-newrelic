@@ -12,6 +12,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/connectorbuilder"
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -98,8 +99,10 @@ func (u *userBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 				ResourceID:     d.ID,
 			})
 		}
-		// No authentication domains → nothing to sync.
+		// No authentication domains → nothing to sync. Can happen for zero-domain
+		// orgs or when the API key lacks visibility into any domain.
 		if bag.Current() == nil {
+			ctxzap.Extract(ctx).Debug("no authentication domains found, skipping user sync")
 			return nil, nil, nil
 		}
 	}

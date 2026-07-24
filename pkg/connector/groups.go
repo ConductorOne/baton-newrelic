@@ -214,12 +214,12 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
-			"newrelic-connector: only users can be granted group membership",
+			"baton-newrelic: only users can be granted group membership",
 			zap.String("principal_id", principal.Id.String()),
 			zap.String("principal_type", principal.Id.ResourceType),
 		)
 
-		return nil, fmt.Errorf("newrelic-connector: only users can be granted group membership")
+		return nil, fmt.Errorf("baton-newrelic: only users can be granted group membership")
 	}
 
 	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
@@ -228,7 +228,7 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 		if errors.Is(err, newrelic.ErrAlreadyMember) {
 			return annotations.New(&v2.GrantAlreadyExists{}), nil
 		}
-		return nil, fmt.Errorf("newrelic-connector: failed to add user to group: %w", err)
+		return nil, fmt.Errorf("baton-newrelic: failed to add user to group: %w", err)
 	}
 
 	return nil, nil
@@ -242,12 +242,12 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 
 	if principal.Id.ResourceType != userResourceType.Id {
 		l.Warn(
-			"newrelic-connector: only users can have group membership revoked",
+			"baton-newrelic: only users can have group membership revoked",
 			zap.String("principal_id", principal.Id.String()),
 			zap.String("principal_type", principal.Id.ResourceType),
 		)
 
-		return nil, fmt.Errorf("newrelic-connector: only users can have group membership revoked")
+		return nil, fmt.Errorf("baton-newrelic: only users can have group membership revoked")
 	}
 
 	groupId, userId := entitlement.Resource.Id.Resource, principal.Id.Resource
@@ -256,7 +256,7 @@ func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations
 		if errors.Is(err, newrelic.ErrNotMember) {
 			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
 		}
-		return nil, fmt.Errorf("newrelic-connector: failed to remove user from group: %w", err)
+		return nil, fmt.Errorf("baton-newrelic: failed to remove user from group: %w", err)
 	}
 
 	return nil, nil
