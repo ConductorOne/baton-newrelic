@@ -124,20 +124,19 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 	return accounts[0].ID, nil
 }
 
-// ListUsers returns users via the NerdGraph v2 userManagement query.
+// ListUsers returns users via the NerdGraph userManagement query.
 //
-// Resource IDs are always the v2 identity `id` — never the legacy v1 `userId`
-// from the deprecated `users.userSearch` API. Two invariants require this:
+// New Relic has a single user ID namespace: userManagement's `id`,
+// users.userSearch's `userId`, and actor.user's `id` all return the same value
+// for a given user. Sourcing users here rather than from users.userSearch
+// therefore does not change resource IDs, and stays consistent with
+// ListGroupMembers (which reads group members from the same API).
 //
-//  1. Mutations (userManagementDeleteUser, userManagementUpdateUser,
-//     userManagementAddUsersToGroups, etc.) only accept v2 identity IDs.
-//
-//  2. Consistency with ListGroupMembers: the groupMembersQuery also uses the
-//     v2 `userManagement` API and returns `id` (v2 identity id) for each
-//     group member. Grants() in groups.go uses those IDs as grant-principal
-//     resource IDs. If ListUsers returned v1 IDs instead, user resources and
-//     grant principals would never match — every grant would be permanently
-//     dangling. (This was the pre-PR state for multi-domain orgs.)
+// userManagement is nonetheless the only correct source, because
+// users.userSearch omits users whose emailVerificationState is still "Pending".
+// A user created by CreateAccount is Pending until they accept the invite, so
+// userSearch would not report it and the sync would drop newly provisioned
+// users until they verified their email.
 func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
 	var resV2 UsersResponseV2
 	variables := map[string]interface{}{}

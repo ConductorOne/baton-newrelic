@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -377,6 +378,32 @@ func TestCreateUser_OtherGraphQLErrorSurfaces(t *testing.T) {
 	}
 }
 
+// --- userType enum name matches the live NerdGraph schema ---
+//
+// The mock server does not validate GraphQL types, so a wrong enum name passes
+// every other test here and only fails against the real API with
+// `Unknown type "..."`. NerdGraph names this enum UserManagementRequestedTierName;
+// UserManagementRequestedTier does not exist.
+
+func TestUserMutations_UseSchemaUserTypeEnum(t *testing.T) {
+	const want = "UserManagementRequestedTierName"
+
+	mutations := map[string]string{
+		"CreateUser": composeCreateUserMutation(),
+		"UpdateUser": composeUpdateUserMutation([]string{"userType"}),
+	}
+
+	for name, mutation := range mutations {
+		if !strings.Contains(mutation, want) {
+			t.Errorf("%s mutation must declare $userType as %s, got:\n%s", name, want, mutation)
+		}
+		// Any remaining mention after stripping the valid name is the bad name.
+		if strings.Contains(strings.ReplaceAll(mutation, want, ""), "UserManagementRequestedTier") {
+			t.Errorf("%s mutation declares nonexistent type UserManagementRequestedTier, got:\n%s", name, mutation)
+		}
+	}
+}
+
 func TestIsAlreadyExistsErr(t *testing.T) {
 	yes := []GraphqlError{
 		{Message: "email already exists"},
@@ -396,12 +423,11 @@ func TestIsAlreadyExistsErr(t *testing.T) {
 	}
 }
 
-// --- ListGroupMembers returns v2 identity ids (consistent with ListUsers) ---
+// --- ListGroupMembers reads member ids from the userManagement API ---
 //
-// This test documents the consistency invariant: both ListUsers and
-// ListGroupMembers return the v2 identity id. If one returned v1 and the other
-// v2, grant principals from Grants() would never resolve to user resources from
-// List(), making every group-membership grant permanently dangling.
+// Grants() in groups.go uses these ids as grant-principal resource ids, so they
+// must come from the same API as ListUsers for principals to resolve to user
+// resources.
 
 func TestListGroupMembers_ReturnsV2IDs(t *testing.T) {
 	const wantUserID = "v2-identity-abc"

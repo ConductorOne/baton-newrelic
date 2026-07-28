@@ -352,7 +352,7 @@ func composeGetUserByEmailQuery() string {
 }
 
 func composeCreateUserMutation() string {
-	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTier!) {
+	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTierName!) {
 		userManagementCreateUser(
 			createUserOptions: {
 				authenticationDomainId: $authDomainId
@@ -387,7 +387,7 @@ func composeUpdateUserMutation(updateFields []string) string {
 			varDecl += ", $name: String"
 			optBody += "\n\t\t\t\tname: $name"
 		case "userType":
-			varDecl += ", $userType: UserManagementRequestedTier"
+			varDecl += ", $userType: UserManagementRequestedTierName"
 			optBody += "\n\t\t\t\tuserType: $userType"
 		}
 	}
