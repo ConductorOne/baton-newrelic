@@ -404,6 +404,23 @@ func TestUserMutations_UseSchemaUserTypeEnum(t *testing.T) {
 	}
 }
 
+// TestGetUserByEmailQuery_UsesFilterArgument guards against regressing to the
+// nonexistent "search" argument on UserManagementAuthenticationDomain.users.
+// Real NerdGraph schema only exposes filter/cursor/id/sort on that field;
+// introspection confirms UserManagementUserFilterInput.email is a
+// UserManagementEmailInput with eq/contains string fields.
+func TestGetUserByEmailQuery_UsesFilterArgument(t *testing.T) {
+	query := composeGetUserByEmailQuery()
+
+	const want = "filter: {email: {eq: $email}}"
+	if !strings.Contains(query, want) {
+		t.Errorf("GetUserByEmail query must use %q, got:\n%s", want, query)
+	}
+	if strings.Contains(query, "search:") {
+		t.Errorf("GetUserByEmail query must not use nonexistent \"search\" argument, got:\n%s", query)
+	}
+}
+
 func TestIsAlreadyExistsErr(t *testing.T) {
 	yes := []GraphqlError{
 		{Message: "email already exists"},

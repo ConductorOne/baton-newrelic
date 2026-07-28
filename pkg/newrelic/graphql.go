@@ -336,7 +336,7 @@ func composeGetUserByEmailQuery() string {
 				userManagement {
 					authenticationDomains {
 						authenticationDomains {
-							users(search: {email: $email}) {
+							users(filter: {email: {eq: $email}}) {
 								users {
 									id
 									email
