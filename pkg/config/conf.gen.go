@@ -4,9 +4,8 @@ package config
 import "reflect"
 
 type Newrelic struct {
-	Apikey                 string `mapstructure:"apikey"`
-	BaseUrl                string `mapstructure:"base-url"`
-	AuthenticationDomainId string `mapstructure:"authentication-domain-id"`
+	Apikey  string `mapstructure:"apikey"`
+	BaseUrl string `mapstructure:"base-url"`
 }
 
 func (c *Newrelic) findFieldByTag(tagValue string) (any, bool) {

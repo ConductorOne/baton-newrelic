@@ -23,15 +23,14 @@ const (
 )
 
 type NewRelic struct {
-	client                 *newrelic.Client
-	authenticationDomainID string
+	client *newrelic.Client
 }
 
 // ResourceSyncers returns a ResourceSyncerV2 for each resource type that should be synced from the upstream service.
 func (nr *NewRelic) ResourceSyncers(ctx context.Context) []connectorbuilder.ResourceSyncerV2 {
 	return []connectorbuilder.ResourceSyncerV2{
 		newOrgBuilder(nr.client),
-		newUserBuilder(nr.client, nr.authenticationDomainID),
+		newUserBuilder(nr.client),
 		newGroupBuilder(nr.client),
 		newRoleBuilder(nr.client),
 	}
@@ -45,11 +44,6 @@ func (nr *NewRelic) Asset(ctx context.Context, asset *v2.AssetRef) (string, io.R
 
 // Metadata returns metadata about the connector.
 func (nr *NewRelic) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error) {
-	authDomainField := v2.ConnectorAccountCreationSchema_StringField_builder{}.Build()
-	if nr.authenticationDomainID != "" {
-		authDomainField.SetDefaultValue(nr.authenticationDomainID)
-	}
-
 	schemaFields := map[string]*v2.ConnectorAccountCreationSchema_Field{
 		"name": v2.ConnectorAccountCreationSchema_Field_builder{
 			DisplayName: "Full Name",
@@ -77,7 +71,7 @@ func (nr *NewRelic) Metadata(ctx context.Context) (*v2.ConnectorMetadata, error)
 			Description: "The ID of the New Relic authentication domain in which to create the user",
 			Required:    true,
 			Order:       4,
-			StringField: authDomainField,
+			StringField: &v2.ConnectorAccountCreationSchema_StringField{},
 		}.Build(),
 	}
 
@@ -188,7 +182,7 @@ func (nr *NewRelic) GlobalActions(ctx context.Context, registry actions.ActionRe
 }
 
 // New returns a new instance of the connector.
-func New(ctx context.Context, apikey string, baseURL string, authDomainID string) (*NewRelic, error) {
+func New(ctx context.Context, apikey string, baseURL string) (*NewRelic, error) {
 	var httpClient *http.Client
 	var err error
 
@@ -205,7 +199,6 @@ func New(ctx context.Context, apikey string, baseURL string, authDomainID string
 	}
 
 	return &NewRelic{
-		client:                 nrClient,
-		authenticationDomainID: authDomainID,
+		client: nrClient,
 	}, nil
 }

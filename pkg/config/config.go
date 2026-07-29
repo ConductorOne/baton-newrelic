@@ -22,12 +22,6 @@ var (
 		field.WithExportTarget(field.ExportTargetCLIOnly),
 	)
 
-	AuthenticationDomainIDField = field.StringField(
-		"authentication-domain-id",
-		field.WithDescription("The ID of the New Relic authentication domain used when creating user accounts"),
-		field.WithDisplayName("Authentication Domain ID"),
-	)
-
 	// FieldRelationships defines relationships between the fields listed in
 	// Config that can be automatically validated.
 	FieldRelationships = []field.SchemaFieldRelationship{}
@@ -38,7 +32,6 @@ var Config = field.NewConfiguration(
 	[]field.SchemaField{
 		Apikey,
 		BaseURLField,
-		AuthenticationDomainIDField,
 	},
 	field.WithConnectorDisplayName("New Relic"),
 	field.WithIconUrl("/static/app-icons/new-relic.svg"),

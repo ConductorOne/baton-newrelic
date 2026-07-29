@@ -103,12 +103,9 @@
           "isRequired": true
         }
       }
-    },
-    {
-      "name": "authentication-domain-id",
-      "displayName": "Authentication Domain ID",
-      "description": "The ID of the New Relic authentication domain used when creating user accounts",
-      "stringField": {}
     }
-  ]
+  ],
+  "displayName": "New Relic",
+  "helpUrl": "/docs/baton/new-relic",
+  "iconUrl": "/static/app-icons/new-relic.svg"
 }

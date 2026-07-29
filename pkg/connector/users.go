@@ -29,10 +29,9 @@ const (
 )
 
 type userBuilder struct {
-	resourceType           *v2.ResourceType
-	client                 *newrelic.Client
-	authenticationDomainID string
-	orgParentIDCache       atomic.Pointer[v2.ResourceId]
+	resourceType     *v2.ResourceType
+	client           *newrelic.Client
+	orgParentIDCache atomic.Pointer[v2.ResourceId]
 }
 
 func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
@@ -184,9 +183,6 @@ func (u *userBuilder) CreateAccount(
 
 	authDomainID := stringField(profile, "authentication_domain_id")
 	if authDomainID == "" {
-		authDomainID = u.authenticationDomainID
-	}
-	if authDomainID == "" {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires authentication_domain_id")
 	}
 
@@ -272,10 +268,9 @@ func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *
 	return nil, nil
 }
 
-func newUserBuilder(client *newrelic.Client, authDomainID string) *userBuilder {
+func newUserBuilder(client *newrelic.Client) *userBuilder {
 	return &userBuilder{
-		resourceType:           userResourceType,
-		client:                 client,
-		authenticationDomainID: authDomainID,
+		resourceType: userResourceType,
+		client:       client,
 	}
 }
