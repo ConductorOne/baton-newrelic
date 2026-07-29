@@ -816,7 +816,7 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 			if len(raw.Data) == 0 || string(raw.Data) == "null" {
 				return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
 			}
-			ctxzap.Extract(ctx).Warn(
+			ctxzap.Extract(ctx).Debug(
 				"graphql read returned partial data alongside errors",
 				zap.String("first_error", raw.Errors[0].Message),
 				zap.Int("error_count", len(raw.Errors)),
