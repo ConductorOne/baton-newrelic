@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
 
 // ErrAlreadyMember is returned by AddUserToGroup when the user is already in the group.
@@ -813,6 +816,11 @@ func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]inter
 			if len(raw.Data) == 0 || string(raw.Data) == "null" {
 				return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
 			}
+			ctxzap.Extract(ctx).Warn(
+				"graphql read returned partial data alongside errors",
+				zap.String("first_error", raw.Errors[0].Message),
+				zap.Int("error_count", len(raw.Errors)),
+			)
 		}
 	}
 
