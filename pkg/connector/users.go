@@ -24,8 +24,11 @@ func stringField(profile *structpb.Struct, key string) string {
 }
 
 const (
-	profileEmail  = "email"
-	profileUserID = "user_id"
+	profileEmail        = "email"
+	profileUserID       = "user_id"
+	profileName         = "name"
+	profileUserType     = "user_type"
+	profileAuthDomainID = "authentication_domain_id"
 
 	// emailVerificationStatePending is NerdGraph's emailVerificationState value for a
 	// user whose invite hasn't been accepted yet (per New Relic's UserManagement
@@ -175,7 +178,7 @@ func (u *userBuilder) CreateAccount(
 ) (connectorbuilder.CreateAccountResponse, []*v2.PlaintextData, annotations.Annotations, error) {
 	profile := accountInfo.GetProfile()
 
-	email := stringField(profile, "email")
+	email := stringField(profile, profileEmail)
 	if email == "" {
 		email = accountInfo.GetLogin()
 	}
@@ -183,17 +186,17 @@ func (u *userBuilder) CreateAccount(
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires an email address")
 	}
 
-	name := stringField(profile, "name")
+	name := stringField(profile, profileName)
 	if name == "" {
 		name = email
 	}
 
-	userType := stringField(profile, "user_type")
+	userType := stringField(profile, profileUserType)
 	if userType == "" {
-		userType = "FULL_USER_TIER"
+		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires user_type")
 	}
 
-	authDomainID := stringField(profile, "authentication_domain_id")
+	authDomainID := stringField(profile, profileAuthDomainID)
 	if authDomainID == "" {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: create account requires authentication_domain_id")
 	}
