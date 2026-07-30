@@ -13,8 +13,6 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 )
 
 const (
@@ -210,15 +208,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, opts r
 }
 
 func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-
 	if principal.Id.ResourceType != userResourceType.Id {
-		l.Warn(
-			"baton-newrelic: only users can be granted group membership",
-			zap.String("principal_id", principal.Id.String()),
-			zap.String("principal_type", principal.Id.ResourceType),
-		)
-
 		return nil, fmt.Errorf("baton-newrelic: only users can be granted group membership")
 	}
 
@@ -235,18 +225,10 @@ func (g *groupBuilder) Grant(ctx context.Context, principal *v2.Resource, entitl
 }
 
 func (g *groupBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-
 	principal := grant.Principal
 	entitlement := grant.Entitlement
 
 	if principal.Id.ResourceType != userResourceType.Id {
-		l.Warn(
-			"baton-newrelic: only users can have group membership revoked",
-			zap.String("principal_id", principal.Id.String()),
-			zap.String("principal_type", principal.Id.ResourceType),
-		)
-
 		return nil, fmt.Errorf("baton-newrelic: only users can have group membership revoked")
 	}
 
