@@ -15,6 +15,34 @@ sidebarTitle: "New Relic"
 | Groups | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |
 | Users | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> | <Icon icon="square-check" iconType="solid"  color="#c937ae"/> |
 
+The New Relic connector supports account provisioning: creating and deleting users, and adding or removing users from groups.
+
+### Connector actions
+
+Connector actions are custom capabilities that extend C1 automations with app-specific operations. You can use connector actions in the [Perform connector action](/product/admin/automations-steps-reference#perform-connector-action) automation step.
+
+| Action name | Additional fields | Description |
+|-------------|-------------------|-------------|
+| update_user | `user_id` (resource reference, required), `name` (string, optional), `email` (string, optional), `user_type` (string, optional: `BASIC_USER_TIER`, `CORE_USER_TIER`, or `FULL_USER_TIER`) | Updates a New Relic user's full name, email address, and/or user tier. At least one of `name`, `email`, or `user_type` must be provided; any field left blank is unchanged. Returns `success` (boolean) and `user_id` (the ID of the updated user). |
+
+### Find your authentication domain ID
+
+Creating a new user requires an authentication domain ID — New Relic organizes users into authentication domains, and every new user must be created within one. You'll need this ID for the **Authentication Domain ID** field on C1's create-account form.
+
+<Steps>
+<Step>
+From the New Relic user menu, go to **Administration > Authentication domains**.
+</Step>
+<Step>
+Select the authentication domain you want new users created in.
+</Step>
+<Step>
+The domain ID is shown at the top of the authentication domain page. Copy it into the **Authentication Domain ID** field on C1's create-account form.
+</Step>
+</Steps>
+
+See New Relic's [authentication domains documentation](https://docs.newrelic.com/docs/accounts/accounts-billing/new-relic-one-user-management/authentication-domains-saml-sso-scim-more/) for more detail.
+
 ## Gather New Relic credentials 
 
 Configuring the connector requires you to pass in credentials generated in New Relic. Gather these credentials before you move on. 
