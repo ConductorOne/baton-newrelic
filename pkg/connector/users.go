@@ -26,6 +26,11 @@ func stringField(profile *structpb.Struct, key string) string {
 const (
 	profileEmail  = "email"
 	profileUserID = "user_id"
+
+	// emailVerificationStatePending is NerdGraph's emailVerificationState value for a
+	// user whose invite hasn't been accepted yet (per New Relic's UserManagement
+	// schema: one of "Not Verifiable", "Verified", or "Pending").
+	emailVerificationStatePending = "Pending"
 )
 
 type userBuilder struct {
@@ -47,6 +52,13 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 		"last_name":   lastName,
 	}
 
+	// A user whose invite hasn't been accepted yet (emailVerificationState ==
+	// "Pending") can't do anything with the account, so it's not yet enabled.
+	status := v2.UserTrait_Status_STATUS_ENABLED
+	if user.EmailVerificationState == emailVerificationStatePending {
+		status = v2.UserTrait_Status_STATUS_DISABLED
+	}
+
 	resource, err := resource.NewUserResource(
 		user.Name,
 		userResourceType,
@@ -55,7 +67,7 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 			resource.WithUserProfile(profile),
 			resource.WithEmail(user.Email, true),
 			resource.WithUserLogin(user.Email),
-			resource.WithStatus(v2.UserTrait_Status_STATUS_ENABLED),
+			resource.WithStatus(status),
 		},
 		resource.WithParentResourceID(pId),
 	)

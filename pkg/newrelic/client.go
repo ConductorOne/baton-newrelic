@@ -160,11 +160,7 @@ func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) 
 	)
 	for _, domain := range resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
 		for _, user := range domain.Users.Users {
-			users = append(users, User{
-				Name:  user.Name,
-				Email: user.Email,
-				ID:    user.ID,
-			})
+			users = append(users, User(user))
 		}
 		if nextCursor == "" && domain.Users.NextCursor != "" {
 			nextCursor = domain.Users.NextCursor

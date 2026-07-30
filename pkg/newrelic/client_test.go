@@ -345,6 +345,55 @@ func TestListUsers_ReturnsV2IDs(t *testing.T) {
 	}
 }
 
+// --- ListUsers threads emailVerificationState through to the User struct ---
+
+func TestListUsers_ThreadsEmailVerificationState(t *testing.T) {
+	queryHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": map[string]interface{}{
+				"actor": map[string]interface{}{
+					"organization": map[string]interface{}{
+						"userManagement": map[string]interface{}{
+							"authenticationDomains": map[string]interface{}{
+								"authenticationDomains": []interface{}{
+									map[string]interface{}{
+										"users": map[string]interface{}{
+											"users": []interface{}{
+												map[string]interface{}{
+													"id":                     "v2-pending",
+													"email":                  "pending@example.com",
+													"name":                   "Pending",
+													"emailVerificationState": "Pending",
+												},
+											},
+											"nextCursor": nil,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+	})
+	srv := httptest.NewServer(accountsHandler(queryHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+	users, _, err := client.ListUsers(context.Background(), "", "")
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("expected 1 user, got %d", len(users))
+	}
+	if users[0].EmailVerificationState != "Pending" {
+		t.Errorf("EmailVerificationState = %q, want %q", users[0].EmailVerificationState, "Pending")
+	}
+}
+
 // --- CreateUser: duplicate email is classified as ErrUserAlreadyExists ---
 
 func TestCreateUser_DuplicateEmailReturnsErrUserAlreadyExists(t *testing.T) {

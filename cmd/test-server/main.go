@@ -306,7 +306,7 @@ func (s *store) handleUsersQueryV2() interface{} {
 			keyID:                    u.ID,
 			keyEmail:                 u.Email,
 			keyName:                  u.Name,
-			"emailVerificationState": "VERIFIED",
+			"emailVerificationState": "Verified",
 		})
 	}
 
