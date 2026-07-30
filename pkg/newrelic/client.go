@@ -413,7 +413,7 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 		return err
 	}
 	if len(res.Errors) > 0 {
-		if isNotFoundErr(res.Errors[0]) {
+		if isNotFoundErrStrict(res.Errors[0]) {
 			return ErrNotMember
 		}
 		return fmt.Errorf("remove user from group failed: %s", res.Errors[0].Message)
@@ -679,13 +679,12 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 // NOTE: NerdGraph's literal message "could not find the target or you are unauthorized."
 // bundles both "resource not found" and "permission denied" into a single string, so the
 // substring match on "could not find the target" cannot distinguish a genuine missing
-// resource from an authorization failure. Idempotent-revoke correctness is prioritized
-// here: treating a permission error as success is considered an acceptable tradeoff
-// compared to surfacing a spurious error on every repeated revoke.
+// resource from an authorization failure.
 //
-// Do NOT use this for DeleteUser — use isNotFoundErrStrict instead. A swallowed
-// permission error on delete means C1 marks an account deprovisioned while the user
-// still has access, which is a security-relevant false negative.
+// Do NOT use this for DeleteUser or RemoveUserFromGroup — use isNotFoundErrStrict
+// instead. A swallowed permission error on those paths means C1 marks an account
+// deprovisioned, or a group membership revoked, while the user still has access,
+// which is a security-relevant false negative.
 func isNotFoundErr(e GraphqlError) bool {
 	if class, ok := e.Extensions["errorClass"].(string); ok && class == "NOT_FOUND" {
 		return true
@@ -700,7 +699,7 @@ func isNotFoundErr(e GraphqlError) bool {
 // isNotFoundErrStrict reports whether a NerdGraph error has errorClass == "NOT_FOUND".
 // Unlike isNotFoundErr, it does not fall back to message-substring matching.
 // NerdGraph returns errorClass "FORBIDDEN" for permission errors (distinct from
-// "NOT_FOUND"), so a strict check is safe for DELETE paths where a swallowed
+// "NOT_FOUND"), so a strict check is safe for revoke/delete paths where a swallowed
 // permission error would be a security-relevant false negative.
 func isNotFoundErrStrict(e GraphqlError) bool {
 	class, ok := e.Extensions["errorClass"].(string)

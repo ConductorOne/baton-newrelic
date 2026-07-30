@@ -226,6 +226,11 @@ func TestDeleteUser_ForbiddenSurfacesAsError(t *testing.T) {
 }
 
 // --- T7: RemoveUserFromGroup treats not-found as success (idempotent revoke) ---
+//
+// RemoveUserFromGroup uses isNotFoundErrStrict (errorClass == NOT_FOUND only), not
+// the loose isNotFoundErr message-substring fallback, so a permission-denied removal
+// (FORBIDDEN, even carrying NR's ambiguous "could not find the target" message)
+// surfaces as a real error rather than a silent success.
 
 func TestRemoveUserFromGroup_NotFoundIsErrNotMember(t *testing.T) {
 	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -257,6 +262,30 @@ func TestRemoveUserFromGroup_OtherGraphQLErrorSurfaces(t *testing.T) {
 
 	if err := client.RemoveUserFromGroup(context.Background(), "group-1", "user-1"); err == nil {
 		t.Error("RemoveUserFromGroup should return error for non-not-found GraphQL errors, got nil")
+	}
+}
+
+func TestRemoveUserFromGroup_ForbiddenWithAmbiguousMessageSurfacesAsError(t *testing.T) {
+	// NerdGraph returns FORBIDDEN even when the message uses NR's ambiguous literal
+	// "could not find the target or you are unauthorized." RemoveUserFromGroup must
+	// surface this as an error — not silently succeed as ErrNotMember — so a
+	// permission-denied removal is not reported as a completed revoke.
+	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveUserFromGroup(context.Background(), "group-1", "user-1")
+	if err == nil {
+		t.Error("RemoveUserFromGroup should return error for FORBIDDEN, got nil")
+	}
+	if errors.Is(err, ErrNotMember) {
+		t.Error("RemoveUserFromGroup should not classify FORBIDDEN as ErrNotMember")
 	}
 }
 
