@@ -327,14 +327,14 @@ func composeRemoveOrgRoleMutation() string {
 }
 
 // composeGetUserByEmailQuery returns a NerdGraph query that finds a user by email
-// across all authentication domains and returns the v2 identity id required by
-// user-management mutations (userManagementAddUsersToGroups, etc.).
+// within a single authentication domain and returns the v2 identity id required
+// by user-management mutations (userManagementAddUsersToGroups, etc.).
 func composeGetUserByEmailQuery() string {
-	return `query GetUserByEmail($email: String!) {
+	return `query GetUserByEmail($domainId: [ID!], $email: String!) {
 		actor {
 			organization {
 				userManagement {
-					authenticationDomains {
+					authenticationDomains(id: $domainId) {
 						authenticationDomains {
 							users(filter: {email: {eq: $email}}) {
 								users {

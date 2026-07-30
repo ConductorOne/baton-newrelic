@@ -89,6 +89,7 @@ func TestAddUserToGroup_GraphQLErrorHTTP200(t *testing.T) {
 func TestGetUserByEmail_ReturnsV2ID(t *testing.T) {
 	const wantID = "v2-identity-id-abc"
 	const wantEmail = "alice@example.com"
+	const wantDomainID = "domain-1"
 
 	queryHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body GraphqlBody
@@ -99,6 +100,10 @@ func TestGetUserByEmail_ReturnsV2ID(t *testing.T) {
 		// Verify this is the filtered email query (not a ListUsers paginated scan).
 		if body.Variables["email"] != wantEmail {
 			http.Error(w, "unexpected email variable", http.StatusBadRequest)
+			return
+		}
+		if body.Variables["domainId"] != wantDomainID {
+			http.Error(w, "unexpected domainId variable", http.StatusBadRequest)
 			return
 		}
 
@@ -134,7 +139,7 @@ func TestGetUserByEmail_ReturnsV2ID(t *testing.T) {
 
 	client := newTestClient(t, srv.URL)
 
-	user, err := client.GetUserByEmail(context.Background(), wantEmail)
+	user, err := client.GetUserByEmail(context.Background(), wantDomainID, wantEmail)
 	if err != nil {
 		t.Fatalf("GetUserByEmail: %v", err)
 	}
@@ -174,7 +179,7 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 
 	client := newTestClient(t, srv.URL)
 
-	user, err := client.GetUserByEmail(context.Background(), "nobody@example.com")
+	user, err := client.GetUserByEmail(context.Background(), "domain-1", "nobody@example.com")
 	if err != nil {
 		t.Fatalf("GetUserByEmail: unexpected error: %v", err)
 	}
@@ -418,6 +423,23 @@ func TestGetUserByEmailQuery_UsesFilterArgument(t *testing.T) {
 	}
 	if strings.Contains(query, "search:") {
 		t.Errorf("GetUserByEmail query must not use nonexistent \"search\" argument, got:\n%s", query)
+	}
+}
+
+// TestGetUserByEmailQuery_ScopedToDomain guards against regressing to an
+// unfiltered scan across every authentication domain in the org — GetUserByEmail
+// must search only within the domain CreateAccount is provisioning into, the
+// same pattern used by usersQueryV2 and groupMembersQuery.
+func TestGetUserByEmailQuery_ScopedToDomain(t *testing.T) {
+	query := composeGetUserByEmailQuery()
+
+	const wantArg = "authenticationDomains(id: $domainId)"
+	if !strings.Contains(query, wantArg) {
+		t.Errorf("GetUserByEmail query must scope authenticationDomains with %q, got:\n%s", wantArg, query)
+	}
+	const wantDecl = "$domainId: [ID!]"
+	if !strings.Contains(query, wantDecl) {
+		t.Errorf("GetUserByEmail query must declare %q, got:\n%s", wantDecl, query)
 	}
 }
 

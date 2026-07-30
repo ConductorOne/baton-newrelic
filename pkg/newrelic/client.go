@@ -557,14 +557,15 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 	return nil
 }
 
-// GetUserByEmail returns the user with the given email using a single filtered
-// NerdGraph v2 query. The returned User.ID is the v2 identity id required by
-// user-management mutations. Returns nil, nil if no match is found.
-func (c *Client) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+// GetUserByEmail returns the user with the given email within the given
+// authentication domain, using a single filtered NerdGraph v2 query. The
+// returned User.ID is the v2 identity id required by user-management
+// mutations. Returns nil, nil if no match is found.
+func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*User, error) {
 	var res GetUserByEmailResponse
 	body := &GraphqlBody{
 		Query:     composeGetUserByEmailQuery(),
-		Variables: map[string]interface{}{emailKey: email},
+		Variables: map[string]interface{}{domainIDKey: domainId, emailKey: email},
 	}
 	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return nil, fmt.Errorf("GetUserByEmail request failed: %w", err)

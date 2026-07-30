@@ -193,7 +193,7 @@ func (u *userBuilder) CreateAccount(
 	parentID := u.orgParentID(ctx)
 
 	// Step 1: check if user already exists.
-	existing, err := u.client.GetUserByEmail(ctx, email)
+	existing, err := u.client.GetUserByEmail(ctx, authDomainID, email)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to check for existing user: %w", err)
 	}
@@ -214,7 +214,7 @@ func (u *userBuilder) CreateAccount(
 		// pre-check didn't surface) races here: NerdGraph rejects the duplicate.
 		// Re-resolve by email and report AlreadyExists instead of a hard error.
 		if errors.Is(err, newrelic.ErrUserAlreadyExists) {
-			if existing, gErr := u.client.GetUserByEmail(ctx, email); gErr == nil && existing != nil {
+			if existing, gErr := u.client.GetUserByEmail(ctx, authDomainID, email); gErr == nil && existing != nil {
 				existingResource, rErr := userResource(ctx, parentID, existing)
 				if rErr != nil {
 					return nil, nil, nil, fmt.Errorf("baton-newrelic: failed to build existing user resource: %w", rErr)
