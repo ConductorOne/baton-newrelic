@@ -25,6 +25,14 @@ var ErrNotMember = errors.New("user not a member of group")
 // already exists (e.g. a race between the existence check and creation).
 var ErrUserAlreadyExists = errors.New("user with email already exists")
 
+// ErrRoleAlreadyAssigned is returned by AddGroupRole/AddAccountRole/AddOrgRole
+// when the role is already assigned to the group.
+var ErrRoleAlreadyAssigned = errors.New("role already assigned to group")
+
+// ErrRoleNotAssigned is returned by RemoveGroupRole/RemoveAccountRole/RemoveOrgRole
+// when the role is not assigned to the group.
+var ErrRoleNotAssigned = errors.New("role not assigned to group")
+
 const (
 	BaseHost        = "api.newrelic.com"
 	GraphQHEndpoint = "/graphql"
@@ -429,7 +437,7 @@ func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error
 	}
 	if len(res.Errors) > 0 {
 		if isAlreadyMemberErr(res.Errors[0]) {
-			return nil
+			return ErrRoleAlreadyAssigned
 		}
 		return fmt.Errorf("add group role failed: %s", res.Errors[0].Message)
 	}
@@ -453,7 +461,7 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 	}
 	if len(res.Errors) > 0 {
 		if isAlreadyMemberErr(res.Errors[0]) {
-			return nil
+			return ErrRoleAlreadyAssigned
 		}
 		return fmt.Errorf("add account role failed: %s", res.Errors[0].Message)
 	}
@@ -476,7 +484,7 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 	}
 	if len(res.Errors) > 0 {
 		if isAlreadyMemberErr(res.Errors[0]) {
-			return nil
+			return ErrRoleAlreadyAssigned
 		}
 		return fmt.Errorf("add org role failed: %s", res.Errors[0].Message)
 	}
@@ -498,8 +506,8 @@ func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) er
 		return err
 	}
 	if len(res.Errors) > 0 {
-		if isNotFoundErr(res.Errors[0]) {
-			return nil
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
 		}
 		return fmt.Errorf("remove group role failed: %s", res.Errors[0].Message)
 	}
@@ -522,8 +530,8 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 		return err
 	}
 	if len(res.Errors) > 0 {
-		if isNotFoundErr(res.Errors[0]) {
-			return nil
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
 		}
 		return fmt.Errorf("remove account role failed: %s", res.Errors[0].Message)
 	}
@@ -545,8 +553,8 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		return err
 	}
 	if len(res.Errors) > 0 {
-		if isNotFoundErr(res.Errors[0]) {
-			return nil
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
 		}
 		return fmt.Errorf("remove org role failed: %s", res.Errors[0].Message)
 	}

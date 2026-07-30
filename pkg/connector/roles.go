@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -268,6 +269,9 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	}
 
 	if err != nil {
+		if errors.Is(err, newrelic.ErrRoleAlreadyAssigned) {
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
+		}
 		return nil, fmt.Errorf("baton-newrelic: failed to add role to group: %w", err)
 	}
 
@@ -314,6 +318,9 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	}
 
 	if err != nil {
+		if errors.Is(err, newrelic.ErrRoleNotAssigned) {
+			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+		}
 		return nil, fmt.Errorf("baton-newrelic: failed to remove role from group: %w", err)
 	}
 

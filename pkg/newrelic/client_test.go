@@ -260,11 +260,14 @@ func TestRemoveUserFromGroup_OtherGraphQLErrorSurfaces(t *testing.T) {
 	}
 }
 
-// --- Add*Role idempotency: already-granted treated as success ---
+// --- Add*Role idempotency: already-granted surfaces as ErrRoleAlreadyAssigned ---
+//
+// Unlike group membership, role grant/revoke sentinels must survive the client
+// layer (not collapse to a bare nil) so roleBuilder.Grant/Revoke in
+// pkg/connector/roles.go can map them to the GrantAlreadyExists annotation,
+// same pattern as groups.go's ErrAlreadyMember/ErrNotMember.
 
-func TestAddGroupRole_AlreadyGrantedIsSuccess(t *testing.T) {
-	// NerdGraph returns HTTP 200 with an errors array carrying an already-granted signal.
-	// AddGroupRole must treat this as success (nil error) for idempotency.
+func TestAddGroupRole_AlreadyGrantedIsErrRoleAlreadyAssigned(t *testing.T) {
 	alreadyGrantedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -275,8 +278,43 @@ func TestAddGroupRole_AlreadyGrantedIsSuccess(t *testing.T) {
 
 	client := newTestClient(t, srv.URL)
 
-	if err := client.AddGroupRole(context.Background(), "role-1", "group-1"); err != nil {
-		t.Errorf("AddGroupRole should return nil for already-granted role, got: %v", err)
+	err := client.AddGroupRole(context.Background(), "role-1", "group-1")
+	if !errors.Is(err, ErrRoleAlreadyAssigned) {
+		t.Errorf("AddGroupRole should return ErrRoleAlreadyAssigned for already-granted role, got: %v", err)
+	}
+}
+
+func TestAddAccountRole_AlreadyGrantedIsErrRoleAlreadyAssigned(t *testing.T) {
+	alreadyGrantedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"role already added to group","extensions":{"errorClass":"DUPLICATE"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(alreadyGrantedHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.AddAccountRole(context.Background(), "role-1", "group-1", 1)
+	if !errors.Is(err, ErrRoleAlreadyAssigned) {
+		t.Errorf("AddAccountRole should return ErrRoleAlreadyAssigned for already-granted role, got: %v", err)
+	}
+}
+
+func TestAddOrgRole_AlreadyGrantedIsErrRoleAlreadyAssigned(t *testing.T) {
+	alreadyGrantedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"role already added to group","extensions":{"errorClass":"DUPLICATE"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(alreadyGrantedHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.AddOrgRole(context.Background(), "role-1", "group-1")
+	if !errors.Is(err, ErrRoleAlreadyAssigned) {
+		t.Errorf("AddOrgRole should return ErrRoleAlreadyAssigned for already-granted role, got: %v", err)
 	}
 }
 
@@ -293,6 +331,118 @@ func TestAddGroupRole_OtherGraphQLErrorSurfaces(t *testing.T) {
 
 	if err := client.AddGroupRole(context.Background(), "role-1", "group-1"); err == nil {
 		t.Error("AddGroupRole should return error for non-already-granted GraphQL errors, got nil")
+	}
+}
+
+// --- Remove*Role idempotency: strict not-found surfaces as ErrRoleNotAssigned ---
+//
+// Remove*Role uses isNotFoundErrStrict (errorClass == NOT_FOUND only), not the
+// loose isNotFoundErr message-substring fallback, so a permission-denied revoke
+// (FORBIDDEN, even carrying NR's ambiguous "could not find the target" message)
+// surfaces as a real error rather than a silent success.
+
+func TestRemoveGroupRole_StrictNotFoundIsErrRoleNotAssigned(t *testing.T) {
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"NOT_FOUND"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(notFoundHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveGroupRole(context.Background(), "role-1", "group-1")
+	if !errors.Is(err, ErrRoleNotAssigned) {
+		t.Errorf("RemoveGroupRole should return ErrRoleNotAssigned for NOT_FOUND, got: %v", err)
+	}
+}
+
+func TestRemoveGroupRole_ForbiddenSurfacesAsError(t *testing.T) {
+	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveGroupRole(context.Background(), "role-1", "group-1")
+	if err == nil {
+		t.Error("RemoveGroupRole should return error for FORBIDDEN, got nil")
+	}
+	if errors.Is(err, ErrRoleNotAssigned) {
+		t.Error("RemoveGroupRole should not classify FORBIDDEN as ErrRoleNotAssigned")
+	}
+}
+
+func TestRemoveAccountRole_StrictNotFoundIsErrRoleNotAssigned(t *testing.T) {
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"NOT_FOUND"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(notFoundHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveAccountRole(context.Background(), "role-1", "group-1", 1)
+	if !errors.Is(err, ErrRoleNotAssigned) {
+		t.Errorf("RemoveAccountRole should return ErrRoleNotAssigned for NOT_FOUND, got: %v", err)
+	}
+}
+
+func TestRemoveAccountRole_ForbiddenSurfacesAsError(t *testing.T) {
+	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveAccountRole(context.Background(), "role-1", "group-1", 1)
+	if err == nil {
+		t.Error("RemoveAccountRole should return error for FORBIDDEN, got nil")
+	}
+}
+
+func TestRemoveOrgRole_StrictNotFoundIsErrRoleNotAssigned(t *testing.T) {
+	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"NOT_FOUND"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(notFoundHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveOrgRole(context.Background(), "role-1", "group-1")
+	if !errors.Is(err, ErrRoleNotAssigned) {
+		t.Errorf("RemoveOrgRole should return ErrRoleNotAssigned for NOT_FOUND, got: %v", err)
+	}
+}
+
+func TestRemoveOrgRole_ForbiddenSurfacesAsError(t *testing.T) {
+	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.RemoveOrgRole(context.Background(), "role-1", "group-1")
+	if err == nil {
+		t.Error("RemoveOrgRole should return error for FORBIDDEN, got nil")
 	}
 }
 
