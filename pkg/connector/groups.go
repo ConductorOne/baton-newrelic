@@ -93,14 +93,16 @@ func (g *groupBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId
 			)
 		}
 
-		var token string
+		// bag.Current() == nil here means every domain (across every page) had
+		// zero groups, so no group phase was ever pushed. NextToken("") would
+		// still seed a non-nil empty page state and return a non-empty token,
+		// which makes the SDK call back in with a token that doesn't match any
+		// resource type below — leaving next as "" instead terminates pagination.
+		var next string
 		if bag.Current() != nil {
-			token = bag.PageToken()
-		}
-
-		next, err := bag.NextToken(token)
-		if err != nil {
-			if err.Error() != "no active page state" {
+			var err error
+			next, err = bag.NextToken(bag.PageToken())
+			if err != nil {
 				return nil, nil, err
 			}
 		}

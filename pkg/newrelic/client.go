@@ -43,6 +43,12 @@ const (
 	userIDKey   = "userId"
 	emailKey    = "email"
 	nameKey     = "name"
+	userTypeKey = "userType"
+
+	errorClassNotFound      = "NOT_FOUND"
+	errorClassDuplicate     = "DUPLICATE"
+	errorClassAlreadyExists = "ALREADY_EXISTS"
+	errorClassConflict      = "CONFLICT"
 )
 
 type Client struct {
@@ -594,7 +600,7 @@ func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, user
 		"authDomainId": authDomainId,
 		emailKey:       email,
 		nameKey:        name,
-		"userType":     userType,
+		userTypeKey:    userType,
 	}
 
 	body := &GraphqlBody{
@@ -631,8 +637,8 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 		updateFields = append(updateFields, nameKey)
 	}
 	if userType != "" {
-		variables["userType"] = userType
-		updateFields = append(updateFields, "userType")
+		variables[userTypeKey] = userType
+		updateFields = append(updateFields, userTypeKey)
 	}
 
 	var res UpdateUserResponse
@@ -686,7 +692,7 @@ func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 // deprovisioned, or a group membership revoked, while the user still has access,
 // which is a security-relevant false negative.
 func isNotFoundErr(e GraphqlError) bool {
-	if class, ok := e.Extensions["errorClass"].(string); ok && class == "NOT_FOUND" {
+	if class, ok := e.Extensions["errorClass"].(string); ok && class == errorClassNotFound {
 		return true
 	}
 	lower := strings.ToLower(e.Message)
@@ -703,7 +709,7 @@ func isNotFoundErr(e GraphqlError) bool {
 // permission error would be a security-relevant false negative.
 func isNotFoundErrStrict(e GraphqlError) bool {
 	class, ok := e.Extensions["errorClass"].(string)
-	return ok && class == "NOT_FOUND"
+	return ok && class == errorClassNotFound
 }
 
 // isAlreadyMemberErr reports whether a NerdGraph error represents an "already a member"
@@ -711,7 +717,7 @@ func isNotFoundErrStrict(e GraphqlError) bool {
 func isAlreadyMemberErr(e GraphqlError) bool {
 	if class, ok := e.Extensions["errorClass"].(string); ok {
 		switch class {
-		case "DUPLICATE", "ALREADY_EXISTS", "CONFLICT":
+		case errorClassDuplicate, errorClassAlreadyExists, errorClassConflict:
 			return true
 		}
 	}
@@ -728,7 +734,7 @@ func isAlreadyMemberErr(e GraphqlError) bool {
 func isAlreadyExistsErr(e GraphqlError) bool {
 	if class, ok := e.Extensions["errorClass"].(string); ok {
 		switch class {
-		case "DUPLICATE", "ALREADY_EXISTS", "CONFLICT":
+		case errorClassDuplicate, errorClassAlreadyExists, errorClassConflict:
 			return true
 		}
 	}

@@ -386,7 +386,7 @@ func composeUpdateUserMutation(updateFields []string) string {
 		case nameKey:
 			varDecl += ", $name: String"
 			optBody += "\n\t\t\t\tname: $name"
-		case "userType":
+		case userTypeKey:
 			varDecl += ", $userType: UserManagementRequestedTierName"
 			optBody += "\n\t\t\t\tuserType: $userType"
 		}

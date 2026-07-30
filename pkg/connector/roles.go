@@ -155,9 +155,18 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 			)
 		}
 
-		next, err := bag.NextToken(bag.PageToken())
-		if err != nil {
-			return nil, nil, err
+		// bag.Current() == nil here means every domain (across every page) had
+		// zero groups, so no group phase was ever pushed. NextToken("") would
+		// still seed a non-nil empty page state and return a non-empty token,
+		// which makes the SDK call back in with a token that doesn't match any
+		// resource type below — leaving next as "" instead terminates pagination.
+		var next string
+		if bag.Current() != nil {
+			var err error
+			next, err = bag.NextToken(bag.PageToken())
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 
 		return nil, &rs.SyncOpResults{NextPageToken: next}, nil
