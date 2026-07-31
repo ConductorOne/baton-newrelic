@@ -33,12 +33,13 @@ func TestUserResource_PendingEmailVerificationIsDisabled(t *testing.T) {
 		t.Fatalf("userResource: %v", err)
 	}
 
-	trait, err := rs.GetUserTrait(r)
-	if err != nil {
-		t.Fatalf("GetUserTrait: %v", err)
-	}
-	if trait.GetStatus().GetStatus() != v2.UserTrait_Status_STATUS_DISABLED {
-		t.Errorf("status = %v, want STATUS_DISABLED for Pending user", trait.GetStatus().GetStatus())
+	status := rs.GetStatus(r)
+	if status == nil || status.GetStatus() != v2.Status_RESOURCE_STATUS_DISABLED {
+		got := v2.Status_RESOURCE_STATUS_UNSPECIFIED
+		if status != nil {
+			got = status.GetStatus()
+		}
+		t.Errorf("status = %v, want RESOURCE_STATUS_DISABLED for Pending user", got)
 	}
 }
 
@@ -55,12 +56,13 @@ func TestUserResource_VerifiedEmailIsEnabled(t *testing.T) {
 		t.Fatalf("userResource: %v", err)
 	}
 
-	trait, err := rs.GetUserTrait(r)
-	if err != nil {
-		t.Fatalf("GetUserTrait: %v", err)
-	}
-	if trait.GetStatus().GetStatus() != v2.UserTrait_Status_STATUS_ENABLED {
-		t.Errorf("status = %v, want STATUS_ENABLED for Verified user", trait.GetStatus().GetStatus())
+	status := rs.GetStatus(r)
+	if status == nil || status.GetStatus() != v2.Status_RESOURCE_STATUS_ENABLED {
+		got := v2.Status_RESOURCE_STATUS_UNSPECIFIED
+		if status != nil {
+			got = status.GetStatus()
+		}
+		t.Errorf("status = %v, want RESOURCE_STATUS_ENABLED for Verified user", got)
 	}
 }
 
@@ -77,12 +79,13 @@ func TestUserResource_NotVerifiableEmailIsEnabled(t *testing.T) {
 		t.Fatalf("userResource: %v", err)
 	}
 
-	trait, err := rs.GetUserTrait(r)
-	if err != nil {
-		t.Fatalf("GetUserTrait: %v", err)
-	}
-	if trait.GetStatus().GetStatus() != v2.UserTrait_Status_STATUS_ENABLED {
-		t.Errorf("status = %v, want STATUS_ENABLED for Not Verifiable user", trait.GetStatus().GetStatus())
+	status := rs.GetStatus(r)
+	if status == nil || status.GetStatus() != v2.Status_RESOURCE_STATUS_ENABLED {
+		got := v2.Status_RESOURCE_STATUS_UNSPECIFIED
+		if status != nil {
+			got = status.GetStatus()
+		}
+		t.Errorf("status = %v, want RESOURCE_STATUS_ENABLED for Not Verifiable user", got)
 	}
 }
 

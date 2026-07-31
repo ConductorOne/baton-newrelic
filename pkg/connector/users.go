@@ -57,9 +57,9 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 
 	// A user whose invite hasn't been accepted yet (emailVerificationState ==
 	// "Pending") can't do anything with the account, so it's not yet enabled.
-	status := v2.UserTrait_Status_STATUS_ENABLED
+	status := v2.Status_RESOURCE_STATUS_ENABLED
 	if user.EmailVerificationState == emailVerificationStatePending {
-		status = v2.UserTrait_Status_STATUS_DISABLED
+		status = v2.Status_RESOURCE_STATUS_DISABLED
 	}
 
 	resource, err := resource.NewUserResource(
@@ -67,12 +67,12 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 		userResourceType,
 		user.ID,
 		[]resource.UserTraitOption{
-			resource.WithUserProfile(profile),
 			resource.WithEmail(user.Email, true),
 			resource.WithUserLogin(user.Email),
-			resource.WithStatus(status),
 		},
 		resource.WithParentResourceID(pId),
+		resource.WithResourceProfile(profile),
+		resource.WithResourceStatus(status, ""),
 	)
 
 	if err != nil {
