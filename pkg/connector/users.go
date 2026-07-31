@@ -46,6 +46,19 @@ func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return userResourceType
 }
 
+func userTraitStatusToResourceStatus(status v2.UserTrait_Status_Status) v2.Status_ResourceStatus {
+	switch status {
+	case v2.UserTrait_Status_STATUS_ENABLED:
+		return v2.Status_RESOURCE_STATUS_ENABLED
+	case v2.UserTrait_Status_STATUS_DISABLED:
+		return v2.Status_RESOURCE_STATUS_DISABLED
+	case v2.UserTrait_Status_STATUS_DELETED:
+		return v2.Status_RESOURCE_STATUS_DELETED
+	default:
+		return v2.Status_RESOURCE_STATUS_UNSPECIFIED
+	}
+}
+
 func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) (*v2.Resource, error) {
 	firstName, lastName := resource.SplitFullName(user.Name)
 	profile := map[string]interface{}{
@@ -67,12 +80,12 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 		userResourceType,
 		user.ID,
 		[]resource.UserTraitOption{
-			resource.WithUserProfile(profile),
 			resource.WithEmail(user.Email, true),
 			resource.WithUserLogin(user.Email),
-			resource.WithStatus(status),
 		},
 		resource.WithParentResourceID(pId),
+		resource.WithResourceProfile(profile),
+		resource.WithResourceStatus(userTraitStatusToResourceStatus(status), ""),
 	)
 
 	if err != nil {

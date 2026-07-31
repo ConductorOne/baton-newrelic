@@ -38,10 +38,9 @@ func roleResource(ctx context.Context, pId *v2.ResourceId, role *newrelic.Role) 
 		role.DisplayName,
 		roleResourceType,
 		role.ID,
-		[]rs.RoleTraitOption{
-			rs.WithRoleProfile(profile),
-		},
+		nil,
 		rs.WithParentResourceID(pId),
+		rs.WithResourceProfile(profile),
 	)
 
 	if err != nil {
@@ -91,17 +90,12 @@ func (r *roleBuilder) List(ctx context.Context, parentResourceID *v2.ResourceId,
 func (r *roleBuilder) Entitlements(_ context.Context, resource *v2.Resource, _ rs.SyncOpAttrs) ([]*v2.Entitlement, *rs.SyncOpResults, error) {
 	var rv []*v2.Entitlement
 
-	rolesTrait, err := rs.GetRoleTrait(resource)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	roleScope, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_scope")
+	roleScope, ok := rs.GetProfileStringValue(rs.GetProfile(resource), "role_scope")
 	if !ok {
 		return nil, nil, fmt.Errorf("unable to get role scope from role trait profile")
 	}
 
-	roleName, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_name")
+	roleName, ok := rs.GetProfileStringValue(rs.GetProfile(resource), "role_name")
 	if !ok {
 		return nil, nil, fmt.Errorf("unable to get role name from role trait profile")
 	}
@@ -180,12 +174,7 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 		domainId := parts[0]
 		cursor := parts[1]
 
-		rolesTrait, err := rs.GetRoleTrait(resource)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		roleName, ok := rs.GetProfileStringValue(rolesTrait.Profile, "role_name")
+		roleName, ok := rs.GetProfileStringValue(rs.GetProfile(resource), "role_name")
 		if !ok {
 			return nil, nil, fmt.Errorf("unable to get role name from role trait profile")
 		}
@@ -244,18 +233,13 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 		return nil, fmt.Errorf("baton-newrelic: only groups can be granted role membership")
 	}
 
-	// check if principal is valid in regards to scope of role entitlement
-	roleTrait, err := rs.GetRoleTrait(entitlement.Resource)
-	if err != nil {
-		return nil, err
-	}
-
-	roleScope, ok := rs.GetProfileStringValue(roleTrait.Profile, "role_scope")
+	roleScope, ok := rs.GetProfileStringValue(rs.GetProfile(entitlement.Resource), "role_scope")
 	if !ok {
 		return nil, fmt.Errorf("unable to get role scope from role trait profile")
 	}
 
 	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	var err error
 	switch roleScope {
 	case orgScope:
 		err = r.client.AddOrgRole(ctx, roleId, groupId)
@@ -285,18 +269,13 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 		return nil, fmt.Errorf("baton-newrelic: only groups can have role membership revoked")
 	}
 
-	// check if principal is valid in regards to scope of role entitlement
-	roleTrait, err := rs.GetRoleTrait(entitlement.Resource)
-	if err != nil {
-		return nil, err
-	}
-
-	roleScope, ok := rs.GetProfileStringValue(roleTrait.Profile, "role_scope")
+	roleScope, ok := rs.GetProfileStringValue(rs.GetProfile(entitlement.Resource), "role_scope")
 	if !ok {
 		return nil, fmt.Errorf("unable to get role scope from role trait profile")
 	}
 
 	roleId, groupId := entitlement.Resource.Id.Resource, principal.Id.Resource
+	var err error
 	switch roleScope {
 	case orgScope:
 		err = r.client.RemoveOrgRole(ctx, roleId, groupId)

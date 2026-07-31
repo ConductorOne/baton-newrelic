@@ -37,10 +37,9 @@ func groupResource(ctx context.Context, parentId *v2.ResourceId, domainId string
 		group.Name,
 		groupResourceType,
 		group.ID,
-		[]rs.GroupTraitOption{
-			rs.WithGroupProfile(profile),
-		},
+		nil,
 		rs.WithParentResourceID(parentId),
+		rs.WithResourceProfile(profile),
 	)
 
 	if err != nil {
@@ -174,12 +173,7 @@ func (g *groupBuilder) Grants(ctx context.Context, resource *v2.Resource, opts r
 		return nil, nil, err
 	}
 
-	groupTrait, err := rs.GetGroupTrait(resource)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	domainId, ok := rs.GetProfileStringValue(groupTrait.Profile, "group_domain")
+	domainId, ok := rs.GetProfileStringValue(rs.GetProfile(resource), "group_domain")
 	if !ok {
 		return nil, nil, fmt.Errorf("unable to get domain id from group trait profile")
 	}
