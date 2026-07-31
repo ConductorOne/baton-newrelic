@@ -46,19 +46,6 @@ func (u *userBuilder) ResourceType(ctx context.Context) *v2.ResourceType {
 	return userResourceType
 }
 
-func userTraitStatusToResourceStatus(status v2.UserTrait_Status_Status) v2.Status_ResourceStatus {
-	switch status {
-	case v2.UserTrait_Status_STATUS_ENABLED:
-		return v2.Status_RESOURCE_STATUS_ENABLED
-	case v2.UserTrait_Status_STATUS_DISABLED:
-		return v2.Status_RESOURCE_STATUS_DISABLED
-	case v2.UserTrait_Status_STATUS_DELETED:
-		return v2.Status_RESOURCE_STATUS_DELETED
-	default:
-		return v2.Status_RESOURCE_STATUS_UNSPECIFIED
-	}
-}
-
 func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) (*v2.Resource, error) {
 	firstName, lastName := resource.SplitFullName(user.Name)
 	profile := map[string]interface{}{
@@ -70,9 +57,9 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 
 	// A user whose invite hasn't been accepted yet (emailVerificationState ==
 	// "Pending") can't do anything with the account, so it's not yet enabled.
-	status := v2.UserTrait_Status_STATUS_ENABLED
+	status := v2.Status_RESOURCE_STATUS_ENABLED
 	if user.EmailVerificationState == emailVerificationStatePending {
-		status = v2.UserTrait_Status_STATUS_DISABLED
+		status = v2.Status_RESOURCE_STATUS_DISABLED
 	}
 
 	resource, err := resource.NewUserResource(
@@ -85,7 +72,7 @@ func userResource(ctx context.Context, pId *v2.ResourceId, user *newrelic.User) 
 		},
 		resource.WithParentResourceID(pId),
 		resource.WithResourceProfile(profile),
-		resource.WithResourceStatus(userTraitStatusToResourceStatus(status), ""),
+		resource.WithResourceStatus(status, ""),
 	)
 
 	if err != nil {
