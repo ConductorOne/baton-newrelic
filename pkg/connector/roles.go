@@ -2,6 +2,7 @@ package connector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,8 +13,6 @@ import (
 	ent "github.com/conductorone/baton-sdk/pkg/types/entitlement"
 	"github.com/conductorone/baton-sdk/pkg/types/grant"
 	rs "github.com/conductorone/baton-sdk/pkg/types/resource"
-	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
-	"go.uber.org/zap"
 )
 
 const (
@@ -156,9 +155,18 @@ func (r *roleBuilder) Grants(ctx context.Context, resource *v2.Resource, opts rs
 			)
 		}
 
-		next, err := bag.NextToken(bag.PageToken())
-		if err != nil {
-			return nil, nil, err
+		// bag.Current() == nil here means every domain (across every page) had
+		// zero groups, so no group phase was ever pushed. NextToken("") would
+		// still seed a non-nil empty page state and return a non-empty token,
+		// which makes the SDK call back in with a token that doesn't match any
+		// resource type below — leaving next as "" instead terminates pagination.
+		var next string
+		if bag.Current() != nil {
+			var err error
+			next, err = bag.NextToken(bag.PageToken())
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 
 		return nil, &rs.SyncOpResults{NextPageToken: next}, nil
@@ -232,16 +240,8 @@ const (
 )
 
 func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitlement *v2.Entitlement) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-
 	if principal.Id.ResourceType != groupResourceType.Id {
-		l.Warn(
-			"newrelic-connector: only groups can be granted role membership",
-			zap.String("principal_id", principal.Id.String()),
-			zap.String("principal_type", principal.Id.ResourceType),
-		)
-
-		return nil, fmt.Errorf("newrelic-connector: only groups can be granted role membership")
+		return nil, fmt.Errorf("baton-newrelic: only groups can be granted role membership")
 	}
 
 	// check if principal is valid in regards to scope of role entitlement
@@ -264,30 +264,25 @@ func (r *roleBuilder) Grant(ctx context.Context, principal *v2.Resource, entitle
 	case groupScope:
 		err = r.client.AddGroupRole(ctx, roleId, groupId)
 	default:
-		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+		return nil, fmt.Errorf("baton-newrelic: role scope %s is not supported", roleScope)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("newrelic-connector: failed to add role to group: %w", err)
+		if errors.Is(err, newrelic.ErrRoleAlreadyAssigned) {
+			return annotations.New(&v2.GrantAlreadyExists{}), nil
+		}
+		return nil, fmt.Errorf("baton-newrelic: failed to add role to group: %w", err)
 	}
 
 	return nil, nil
 }
 
 func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.Annotations, error) {
-	l := ctxzap.Extract(ctx)
-
 	principal := grant.Principal
 	entitlement := grant.Entitlement
 
 	if principal.Id.ResourceType != groupResourceType.Id {
-		l.Warn(
-			"newrelic-connector: only groups can have role membership revoked",
-			zap.String("principal_id", principal.Id.String()),
-			zap.String("principal_type", principal.Id.ResourceType),
-		)
-
-		return nil, fmt.Errorf("newrelic-connector: only groups can have role membership revoked")
+		return nil, fmt.Errorf("baton-newrelic: only groups can have role membership revoked")
 	}
 
 	// check if principal is valid in regards to scope of role entitlement
@@ -310,11 +305,14 @@ func (r *roleBuilder) Revoke(ctx context.Context, grant *v2.Grant) (annotations.
 	case groupScope:
 		err = r.client.RemoveGroupRole(ctx, roleId, groupId)
 	default:
-		return nil, fmt.Errorf("newrelic-connector: role scope %s is not supported", roleScope)
+		return nil, fmt.Errorf("baton-newrelic: role scope %s is not supported", roleScope)
 	}
 
 	if err != nil {
-		return nil, fmt.Errorf("newrelic-connector: failed to remove role from group: %w", err)
+		if errors.Is(err, newrelic.ErrRoleNotAssigned) {
+			return annotations.New(&v2.GrantAlreadyRevoked{}), nil
+		}
+		return nil, fmt.Errorf("baton-newrelic: failed to remove role from group: %w", err)
 	}
 
 	return nil, nil

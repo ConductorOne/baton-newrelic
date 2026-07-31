@@ -6,18 +6,6 @@ import "fmt"
 const (
 	actorBaseQ = "actor { %s }"
 
-	usersQuery = `users {
-		userSearch(cursor: $userCursor) {
-			nextCursor
-			totalCount
-			users {
-				email
-				name
-				userId
-			}
-		}
-	 }`
-
 	usersQueryV2 = `organization {
 		userManagement {
 			authenticationDomains(id: $domainId) {
@@ -207,7 +195,6 @@ var (
 	OrgQ         = fmt.Sprintf(actorBaseQ, orgQuery)
 	AccountsQ    = fmt.Sprintf(actorBaseQ, accountsQuery)
 
-	UsersQ     = fmt.Sprintf(actorBaseQ, usersQuery)
 	UsersQV2   = fmt.Sprintf(actorBaseQ, usersQueryV2)
 	OrgDetailQ = fmt.Sprintf(actorBaseQ, orgDetailQuery)
 
@@ -239,13 +226,6 @@ func composeUsersQueryV2() string {
 		`query ListUsers($userCursor: String, $domainId: [ID!]) {
 			%s
 		}`, UsersQV2)
-}
-
-func composeUsersQuery() string {
-	return fmt.Sprintf(
-		`query ListUsers($userCursor: String) {
-			%s
-		}`, UsersQ)
 }
 
 func composeOrgQuery() string {
@@ -346,6 +326,100 @@ func composeRemoveOrgRoleMutation() string {
 		}`, RemoveOrgRole)
 }
 
+// composeGetUserByEmailQuery returns a NerdGraph query that finds a user by email
+// within a single authentication domain and returns the v2 identity id required
+// by user-management mutations (userManagementAddUsersToGroups, etc.).
+func composeGetUserByEmailQuery() string {
+	return `query GetUserByEmail($domainId: [ID!], $email: String!) {
+		actor {
+			organization {
+				userManagement {
+					authenticationDomains(id: $domainId) {
+						authenticationDomains {
+							users(filter: {email: {eq: $email}}) {
+								users {
+									id
+									email
+									name
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}`
+}
+
+func composeCreateUserMutation() string {
+	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTierName!) {
+		userManagementCreateUser(
+			createUserOptions: {
+				authenticationDomainId: $authDomainId
+				email: $email
+				name: $name
+				userType: $userType
+			}
+		) {
+			createdUser {
+				id
+				email
+				name
+				type {
+					displayName
+				}
+			}
+		}
+	}`
+}
+
+// composeUpdateUserMutation builds a mutation that only includes fields the caller
+// is actually setting. Omitting a field entirely prevents NerdGraph from nulling it.
+func composeUpdateUserMutation(updateFields []string) string {
+	varDecl := "$userId: ID!"
+	optBody := ""
+	for _, f := range updateFields {
+		switch f {
+		case emailKey:
+			varDecl += ", $email: String"
+			optBody += "\n\t\t\t\temail: $email"
+		case nameKey:
+			varDecl += ", $name: String"
+			optBody += "\n\t\t\t\tname: $name"
+		case userTypeKey:
+			varDecl += ", $userType: UserManagementRequestedTierName"
+			optBody += "\n\t\t\t\tuserType: $userType"
+		}
+	}
+	return fmt.Sprintf(`mutation UpdateUser(%s) {
+		userManagementUpdateUser(
+			updateUserOptions: {
+				id: $userId%s
+			}
+		) {
+			user {
+				id
+				email
+				name
+			}
+		}
+	}`, varDecl, optBody)
+}
+
+func composeDeleteUserMutation() string {
+	return `mutation DeleteUser($userId: ID!) {
+		userManagementDeleteUser(
+			deleteUserOptions: {
+				id: $userId
+			}
+		) {
+			deletedUser {
+				id
+			}
+		}
+	}`
+}
+
 // Request body structure for graphql queries and mutations.
 type GraphqlBody struct {
 	Query     string                 `json:"query"`
@@ -369,15 +443,6 @@ type ListBase struct {
 	NextCursor string `json:"nextCursor"`
 	Total      int    `json:"totalCount"`
 }
-
-type UsersResponse = QueryResponse[struct {
-	Users struct {
-		Search struct {
-			ListBase
-			Users []User `json:"users"`
-		} `json:"userSearch"`
-	} `json:"users"`
-}]
 
 type UsersResponseV2 = QueryResponse[struct {
 	Organization struct {
@@ -452,6 +517,7 @@ type GroupMembersResponse = OrgUserManagementResponse[struct {
 }]
 
 type AddGroupMemberResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Groups []struct {
@@ -463,6 +529,7 @@ type AddGroupMemberResponse struct {
 }
 
 type RemoveGroupMemberResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Groups []struct {
@@ -474,6 +541,7 @@ type RemoveGroupMemberResponse struct {
 }
 
 type GrantRoleResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Roles []struct {
@@ -485,6 +553,7 @@ type GrantRoleResponse struct {
 }
 
 type RevokeRoleResponse struct {
+	GraphqlErrorResponse
 	Data struct {
 		MutData struct {
 			Roles []struct {
@@ -492,5 +561,76 @@ type RevokeRoleResponse struct {
 				ID          int    `json:"roleId"`
 			} `json:"roles"`
 		} `json:"authorizationManagementRevokeAccess"`
+	} `json:"data"`
+}
+
+// GraphqlError represents a single error in a NerdGraph response.
+type GraphqlError struct {
+	Message    string                 `json:"message"`
+	Extensions map[string]interface{} `json:"extensions"`
+}
+
+// GraphqlErrorResponse wraps data with possible top-level errors.
+type GraphqlErrorResponse struct {
+	Errors []GraphqlError `json:"errors"`
+}
+
+type CreateUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementCreateUser struct {
+			CreatedUser struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+				Name  string `json:"name"`
+				Type  struct {
+					DisplayName string `json:"displayName"`
+				} `json:"type"`
+			} `json:"createdUser"`
+		} `json:"userManagementCreateUser"`
+	} `json:"data"`
+}
+
+type UpdateUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementUpdateUser struct {
+			User struct {
+				ID    string `json:"id"`
+				Email string `json:"email"`
+				Name  string `json:"name"`
+			} `json:"user"`
+		} `json:"userManagementUpdateUser"`
+	} `json:"data"`
+}
+
+type DeleteUserResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		UserManagementDeleteUser struct {
+			DeletedUser struct {
+				ID string `json:"id"`
+			} `json:"deletedUser"`
+		} `json:"userManagementDeleteUser"`
+	} `json:"data"`
+}
+
+// GetUserByEmailResponse holds the result of a composeGetUserByEmailQuery call.
+type GetUserByEmailResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		Actor struct {
+			Organization struct {
+				UserManagement struct {
+					AuthenticationDomains struct {
+						AuthenticationDomains []struct {
+							Users struct {
+								Users []UserV2 `json:"users"`
+							} `json:"users"`
+						} `json:"authenticationDomains"`
+					} `json:"authenticationDomains"`
+				} `json:"userManagement"`
+			} `json:"organization"`
+		} `json:"actor"`
 	} `json:"data"`
 }

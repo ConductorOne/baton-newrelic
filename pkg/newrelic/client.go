@@ -4,10 +4,34 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
+
+	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 )
+
+// ErrAlreadyMember is returned by AddUserToGroup when the user is already in the group.
+var ErrAlreadyMember = errors.New("user already a member of group")
+
+// ErrNotMember is returned by RemoveUserFromGroup when the user is not in the group.
+var ErrNotMember = errors.New("user not a member of group")
+
+// ErrUserAlreadyExists is returned by CreateUser when a user with the same email
+// already exists (e.g. a race between the existence check and creation).
+var ErrUserAlreadyExists = errors.New("user with email already exists")
+
+// ErrRoleAlreadyAssigned is returned by AddGroupRole/AddAccountRole/AddOrgRole
+// when the role is already assigned to the group.
+var ErrRoleAlreadyAssigned = errors.New("role already assigned to group")
+
+// ErrRoleNotAssigned is returned by RemoveGroupRole/RemoveAccountRole/RemoveOrgRole
+// when the role is not assigned to the group.
+var ErrRoleNotAssigned = errors.New("role not assigned to group")
 
 const (
 	BaseHost        = "api.newrelic.com"
@@ -16,6 +40,15 @@ const (
 	domainIDKey = "domainId"
 	roleIDKey   = "roleId"
 	groupIDKey  = "groupId"
+	userIDKey   = "userId"
+	emailKey    = "email"
+	nameKey     = "name"
+	userTypeKey = "userType"
+
+	errorClassNotFound      = "NOT_FOUND"
+	errorClassDuplicate     = "DUPLICATE"
+	errorClassAlreadyExists = "ALREADY_EXISTS"
+	errorClassConflict      = "CONFLICT"
 )
 
 type Client struct {
@@ -108,72 +141,54 @@ func GetAccountId(ctx context.Context, httpClient *http.Client, url string, apik
 	return accounts[0].ID, nil
 }
 
-// ListUsers return users across whole organization.
+// ListUsers returns users via the NerdGraph userManagement query.
+//
+// New Relic has a single user ID namespace: userManagement's `id`,
+// users.userSearch's `userId`, and actor.user's `id` all return the same value
+// for a given user. Sourcing users here rather than from users.userSearch
+// therefore does not change resource IDs, and stays consistent with
+// ListGroupMembers (which reads group members from the same API).
+//
+// userManagement is nonetheless the only correct source, because
+// users.userSearch omits users whose emailVerificationState is still "Pending".
+// A user created by CreateAccount is Pending until they accept the invite, so
+// userSearch would not report it and the sync would drop newly provisioned
+// users until they verified their email.
 func (c *Client) ListUsers(ctx context.Context, domainId string, cursor string) ([]User, string, error) {
-	var (
-		res        UsersResponse
-		resV2      UsersResponseV2
-		users      []User
-		nextCursor string
-		err        error
-	)
+	var resV2 UsersResponseV2
 	variables := map[string]interface{}{}
 	if cursor != "" {
 		variables["userCursor"] = cursor
+	}
+	if domainId != "" {
 		variables["domainId"] = domainId
 	}
 
-	if domainId != "" { // It has domain
-		err = c.getResponse(ctx, composeUsersQueryV2, variables, &resV2)
-		if err != nil {
-			return nil, "", err
-		}
-
-		authenticationDomains := resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains
-		if len(authenticationDomains) == 1 {
-			for _, domain := range authenticationDomains {
-				nextCursor = domain.Users.NextCursor
-				for _, user := range domain.Users.Users {
-					users = append(users, User{
-						Name:  user.Name,
-						Email: user.Email,
-						ID:    user.ID,
-					})
-				}
-			}
-
-			return users, nextCursor, nil
-		}
-	}
-
-	// no domains or multiple domains
-	err = c.getResponse(ctx, composeUsersQuery, variables, &res)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeUsersQueryV2(), variables, &resV2); err != nil {
 		return nil, "", err
 	}
 
-	return res.Data.Actor.Users.Search.Users,
-		res.Data.Actor.Users.Search.NextCursor,
-		nil
-}
-
-func (c *Client) getResponse(ctx context.Context, query func() string, variables map[string]interface{}, res interface{}) error {
-	err := c.doRequest(
-		ctx,
-		query(),
-		variables,
-		&res,
+	var (
+		users      []User
+		nextCursor string
 	)
+	for _, domain := range resV2.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
+		for _, user := range domain.Users.Users {
+			users = append(users, User(user))
+		}
+		if nextCursor == "" && domain.Users.NextCursor != "" {
+			nextCursor = domain.Users.NextCursor
+		}
+	}
 
-	return err
+	return users, nextCursor, nil
 }
 
 // GetOrg returns organization details.
 func (c *Client) GetOrg(ctx context.Context) (*Org, error) {
 	var res OrgDetailResponse
 
-	err := c.doRequest(ctx, composeOrgQuery(), nil, &res)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeOrgQuery(), nil, &res); err != nil {
 		return nil, err
 	}
 
@@ -189,13 +204,7 @@ func (c *Client) ListRoles(ctx context.Context, cursor string) ([]Role, string, 
 		variables["roleCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRolesQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeRolesQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -217,13 +226,7 @@ func (c *Client) ListGroupsWithRole(ctx context.Context, domainId, roleId, curso
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAllGroupsWithRoleQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeAllGroupsWithRoleQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -258,13 +261,7 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 		variables["cursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeDomainsQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeDomainsQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -287,6 +284,26 @@ func (c *Client) ListDomains(ctx context.Context, cursor string) ([]Domain, stri
 	return ad, nextDomains, nil
 }
 
+// ListAllDomains enumerates every authentication domain, following the domain
+// cursor so orgs with more domains than fit on a single NerdGraph page are not
+// silently dropped.
+func (c *Client) ListAllDomains(ctx context.Context) ([]Domain, error) {
+	var all []Domain
+	cursor := ""
+	for {
+		domains, next, err := c.ListDomains(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, domains...)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	return all, nil
+}
+
 // ListGroups returns groups with roles under specific domain.
 func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Group, string, error) {
 	var res GroupsResponse
@@ -299,13 +316,7 @@ func (c *Client) ListGroups(ctx context.Context, domainId, cursor string) ([]Gro
 		variables["groupCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeGroupsQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeGroupsQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -335,13 +346,7 @@ func (c *Client) ListGroupMembers(ctx context.Context, domainId, groupId, cursor
 		variables["membersCursor"] = cursor
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeGroupMembersQuery(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	if err := c.doReadRequest(ctx, composeGroupMembersQuery(), variables, &res); err != nil {
 		return nil, "", err
 	}
 
@@ -380,19 +385,22 @@ func (c *Client) AddUserToGroup(ctx context.Context, groupId, userId string) err
 	var res AddGroupMemberResponse
 	variables := map[string]interface{}{
 		groupIDKey: groupId,
-		"userId":  userId,
+		userIDKey:  userId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddGroupMemberMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddGroupMemberMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return ErrAlreadyMember
+		}
+		return fmt.Errorf("add user to group failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -400,19 +408,22 @@ func (c *Client) RemoveUserFromGroup(ctx context.Context, groupId, userId string
 	var res RemoveGroupMemberResponse
 	variables := map[string]interface{}{
 		groupIDKey: groupId,
-		"userId":  userId,
+		userIDKey:  userId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveGroupMemberMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveGroupMemberMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrNotMember
+		}
+		return fmt.Errorf("remove user from group failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -423,16 +434,19 @@ func (c *Client) AddGroupRole(ctx context.Context, roleId, groupId string) error
 		roleIDKey:  roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddGroupRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddGroupRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return ErrRoleAlreadyAssigned
+		}
+		return fmt.Errorf("add group role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -444,16 +458,19 @@ func (c *Client) AddAccountRole(ctx context.Context, roleId, groupId string, acc
 		"roleId":    roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddAccountRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddAccountRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return ErrRoleAlreadyAssigned
+		}
+		return fmt.Errorf("add account role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -464,16 +481,19 @@ func (c *Client) AddOrgRole(ctx context.Context, roleId, groupId string) error {
 		groupIDKey: groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeAddOrgRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeAddOrgRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isAlreadyMemberErr(res.Errors[0]) {
+			return ErrRoleAlreadyAssigned
+		}
+		return fmt.Errorf("add org role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -484,16 +504,19 @@ func (c *Client) RemoveGroupRole(ctx context.Context, roleId, groupId string) er
 		roleIDKey:  roleId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveGroupRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveGroupRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
+		}
+		return fmt.Errorf("remove group role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -505,16 +528,19 @@ func (c *Client) RemoveAccountRole(ctx context.Context, roleId, groupId string, 
 		"groupId":   groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveAccountRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveAccountRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
+		}
+		return fmt.Errorf("remove account role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
@@ -525,55 +551,287 @@ func (c *Client) RemoveOrgRole(ctx context.Context, roleId, groupId string) erro
 		groupIDKey: groupId,
 	}
 
-	err := c.doRequest(
-		ctx,
-		composeRemoveOrgRoleMutation(),
-		variables,
-		&res,
-	)
-	if err != nil {
+	body := &GraphqlBody{
+		Query:     composeRemoveOrgRoleMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
 		return err
 	}
-
+	if len(res.Errors) > 0 {
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return ErrRoleNotAssigned
+		}
+		return fmt.Errorf("remove org role failed: %s", res.Errors[0].Message)
+	}
 	return nil
 }
 
-func (c *Client) doRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
+// GetUserByEmail returns the user with the given email within the given
+// authentication domain, using a single filtered NerdGraph v2 query. The
+// returned User.ID is the v2 identity id required by user-management
+// mutations. Returns nil, nil if no match is found.
+func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*User, error) {
+	var res GetUserByEmailResponse
+	body := &GraphqlBody{
+		Query:     composeGetUserByEmailQuery(),
+		Variables: map[string]interface{}{domainIDKey: domainId, emailKey: email},
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return nil, fmt.Errorf("GetUserByEmail request failed: %w", err)
+	}
+	if len(res.Errors) > 0 {
+		return nil, fmt.Errorf("GetUserByEmail failed: %s", res.Errors[0].Message)
+	}
+	for _, domain := range res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
+		for _, u := range domain.Users.Users {
+			if strings.EqualFold(u.Email, email) {
+				return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
+// CreateUser creates a new user in the given authentication domain.
+func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, userType string) (string, error) {
+	var res CreateUserResponse
+	variables := map[string]interface{}{
+		"authDomainId": authDomainId,
+		emailKey:       email,
+		nameKey:        name,
+		userTypeKey:    userType,
+	}
+
+	body := &GraphqlBody{
+		Query:     composeCreateUserMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return "", err
+	}
+
+	if len(res.Errors) > 0 {
+		if isAlreadyExistsErr(res.Errors[0]) {
+			return "", ErrUserAlreadyExists
+		}
+		return "", fmt.Errorf("create user failed: %s", res.Errors[0].Message)
+	}
+
+	return res.Data.UserManagementCreateUser.CreatedUser.ID, nil
+}
+
+// UpdateUser updates an existing user's attributes (any of email, name, userType may be empty to skip).
+// Only non-empty fields are included in the mutation so absent fields are left unchanged.
+func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType string) error {
+	variables := map[string]interface{}{
+		userIDKey: userId,
+	}
+	var updateFields []string
+	if email != "" {
+		variables[emailKey] = email
+		updateFields = append(updateFields, emailKey)
+	}
+	if name != "" {
+		variables[nameKey] = name
+		updateFields = append(updateFields, nameKey)
+	}
+	if userType != "" {
+		variables[userTypeKey] = userType
+		updateFields = append(updateFields, userTypeKey)
+	}
+
+	var res UpdateUserResponse
+	body := &GraphqlBody{
+		Query:     composeUpdateUserMutation(updateFields),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 {
+		return fmt.Errorf("update user failed: %s", res.Errors[0].Message)
+	}
+	return nil
+}
+
+// DeleteUser permanently deletes a user. Returns nil if user is not found (idempotent).
+func (c *Client) DeleteUser(ctx context.Context, userId string) error {
+	variables := map[string]interface{}{
+		userIDKey: userId,
+	}
+
+	var res DeleteUserResponse
+	body := &GraphqlBody{
+		Query:     composeDeleteUserMutation(),
+		Variables: variables,
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 {
+		if isNotFoundErrStrict(res.Errors[0]) {
+			return nil
+		}
+		return fmt.Errorf("delete user failed: %s", res.Errors[0].Message)
+	}
+	return nil
+}
+
+// isNotFoundErr reports whether a NerdGraph error represents a "not found" condition.
+// It checks the errorClass extension first (preferred) and falls back to message
+// substring matching, including NR's literal not-found message.
+//
+// NOTE: NerdGraph's literal message "could not find the target or you are unauthorized."
+// bundles both "resource not found" and "permission denied" into a single string, so the
+// substring match on "could not find the target" cannot distinguish a genuine missing
+// resource from an authorization failure.
+//
+// Do NOT use this for DeleteUser or RemoveUserFromGroup — use isNotFoundErrStrict
+// instead. A swallowed permission error on those paths means C1 marks an account
+// deprovisioned, or a group membership revoked, while the user still has access,
+// which is a security-relevant false negative.
+func isNotFoundErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok && class == errorClassNotFound {
+		return true
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "does not exist") ||
+		strings.Contains(lower, "no user") ||
+		strings.Contains(lower, "could not find the target")
+}
+
+// isNotFoundErrStrict reports whether a NerdGraph error has errorClass == "NOT_FOUND".
+// Unlike isNotFoundErr, it does not fall back to message-substring matching.
+// NerdGraph returns errorClass "FORBIDDEN" for permission errors (distinct from
+// "NOT_FOUND"), so a strict check is safe for revoke/delete paths where a swallowed
+// permission error would be a security-relevant false negative.
+func isNotFoundErrStrict(e GraphqlError) bool {
+	class, ok := e.Extensions["errorClass"].(string)
+	return ok && class == errorClassNotFound
+}
+
+// isAlreadyMemberErr reports whether a NerdGraph error represents an "already a member"
+// condition for group membership mutations — treated as success for idempotency.
+func isAlreadyMemberErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok {
+		switch class {
+		case errorClassDuplicate, errorClassAlreadyExists, errorClassConflict:
+			return true
+		}
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "already a member") ||
+		strings.Contains(lower, "already in the group") ||
+		strings.Contains(lower, "already added") ||
+		strings.Contains(lower, "duplicate")
+}
+
+// isAlreadyExistsErr reports whether a NerdGraph error indicates the user/email
+// already exists. CreateAccount treats this as an AlreadyExists condition so that
+// a race between the existence check and creation doesn't surface as a hard error.
+func isAlreadyExistsErr(e GraphqlError) bool {
+	if class, ok := e.Extensions["errorClass"].(string); ok {
+		switch class {
+		case errorClassDuplicate, errorClassAlreadyExists, errorClassConflict:
+			return true
+		}
+	}
+	lower := strings.ToLower(e.Message)
+	return strings.Contains(lower, "already exists") ||
+		strings.Contains(lower, "already registered") ||
+		strings.Contains(lower, "duplicate") ||
+		strings.Contains(lower, "email is taken")
+}
+
+// sendGraphqlRequest marshals and POSTs a GraphQL request, and returns the raw
+// response body on a 200 status. Shared by doRawRequest and doReadRequest,
+// which differ only in how they interpret the body (see doReadRequest's
+// partial-error tolerance).
+func sendGraphqlRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody) ([]byte, error) {
+	reqBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal graphql request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("API-Key", apikey)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	return bodyBytes, nil
+}
+
+func doRawRequest(ctx context.Context, httpClient *http.Client, rawURL, apikey string, body *GraphqlBody, res interface{}) error {
+	bodyBytes, err := sendGraphqlRequest(ctx, httpClient, rawURL, apikey, body)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(bodyBytes, res); err != nil {
+		return fmt.Errorf("failed to decode graphql response: %w", err)
+	}
+	return nil
+}
+
+// doReadRequest executes a GraphQL query and tolerates top-level errors alongside
+// partial data. NerdGraph can return usable list data together with non-fatal
+// field-level errors on read/list paths; aborting on any error would discard
+// valid results. For mutations, use doRawRequest with explicit error-array checking.
+//
+// Total failures — NerdGraph HTTP 200 with data=null and a non-empty errors array
+// (e.g. auth/permission denied) — are returned as errors so callers never
+// silently treat a failed read as an empty page.
+func (c *Client) doReadRequest(ctx context.Context, q string, v map[string]interface{}, res interface{}) error {
 	body := &GraphqlBody{
 		Query:     q,
 		Variables: v,
 	}
-	reqBody, err := json.Marshal(body)
+	bodyBytes, err := sendGraphqlRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		c.baseURL.String(),
-		bytes.NewReader(reqBody),
-	)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("API-Key", c.apikey)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(res); err != nil {
+	if err := json.Unmarshal(bodyBytes, res); err != nil {
 		return fmt.Errorf("failed to decode response body: %w", err)
+	}
+
+	// Only probe for a total-failure response (data=null with errors present) when
+	// the body actually contains an "errors" key — avoids a second full unmarshal
+	// of bodyBytes on the common error-free path. Partial-data responses (data !=
+	// null alongside errors) are tolerated on read paths.
+	if bytes.Contains(bodyBytes, []byte(`"errors"`)) {
+		var raw struct {
+			Data   json.RawMessage `json:"data"`
+			Errors []GraphqlError  `json:"errors"`
+		}
+		if json.Unmarshal(bodyBytes, &raw) == nil && len(raw.Errors) > 0 {
+			if len(raw.Data) == 0 || string(raw.Data) == "null" {
+				return fmt.Errorf("graphql read failed: %s", raw.Errors[0].Message)
+			}
+			ctxzap.Extract(ctx).Debug(
+				"graphql read returned partial data alongside errors",
+				zap.String("first_error", raw.Errors[0].Message),
+				zap.Int("error_count", len(raw.Errors)),
+			)
+		}
 	}
 
 	return nil
