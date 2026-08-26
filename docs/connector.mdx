@@ -1,8 +1,8 @@
 ---
 title: "Set up a New Relic connector"
 og:title: "Set up a New Relic connector"
-description: "C1 provides identity governance and just-in-time provisioning for New Relic. Integrate your New Relic instance with C1 to run user access reviews (UARs) and enable just-in-time access requests."
-og:description: "C1 provides identity governance and just-in-time provisioning for New Relic. Integrate your New Relic instance with C1 to run user access reviews (UARs) and enable just-in-time access requests."
+description: "C1 provides identity governance and just-in-time provisioning for New Relic. Integrate your New Relic instance with C1 to run user access reviews (UARs), enable just-in-time access requests, and automatically provision and deprovision access."
+og:description: "C1 provides identity governance and just-in-time provisioning for New Relic. Integrate your New Relic instance with C1 to run user access reviews (UARs), enable just-in-time access requests, and automatically provision and deprovision access."
 sidebarTitle: "New Relic"
 ---
 
@@ -27,7 +27,7 @@ Connector actions are custom capabilities that extend C1 automations with app-sp
 
 ### Find your authentication domain ID
 
-Creating a new user requires an authentication domain ID — New Relic organizes users into authentication domains, and every new user must be created within one. You'll need this ID for the **Authentication Domain ID** field on C1's create-account form.
+New Relic organizes users into authentication domains, and every new user must be created within one. C1 needs this domain's ID before it can create New Relic accounts.
 
 <Steps>
 <Step>
@@ -37,11 +37,28 @@ From the New Relic user menu, go to **Administration > Authentication domains**.
 Select the authentication domain you want new users created in.
 </Step>
 <Step>
-The domain ID is shown at the top of the authentication domain page. Copy it into the **Authentication Domain ID** field on C1's create-account form.
+Copy the domain ID shown at the top of the authentication domain page. You'll use it in the next section.
 </Step>
 </Steps>
 
 See New Relic's [authentication domains documentation](https://docs.newrelic.com/docs/accounts/accounts-billing/new-relic-one-user-management/authentication-domains-saml-sso-scim-more/) for more detail.
+
+### Set up account provisioning mappings
+
+C1 creates a New Relic account when a user requests access to this app. The account details come from the app's provisioning mappings, which you set up on the app's **Overview** page — see [Configure account provisioning](/product/admin/account-provisioning) for the full procedure.
+
+The New Relic connector requires four mappings:
+
+| Destination value | Source value |
+| :--- | :--- |
+| `name` | A CEL expression resolving to the user's full name, such as `subject.display_name` |
+| `email` | A CEL expression resolving to the user's email address, such as `subject.email` |
+| `user_type` | The New Relic tier new accounts receive, as a quoted string: `"BASIC_USER_TIER"`, `"CORE_USER_TIER"`, or `"FULL_USER_TIER"` |
+| `authentication_domain_id` | The domain ID you copied above, as a quoted string |
+
+Enter `user_type` and `authentication_domain_id` as quoted CEL string literals — `"BASIC_USER_TIER"`, not `BASIC_USER_TIER`.
+
+These two are fixed values rather than expressions, so every account this app creates lands in the same tier and the same authentication domain. Set up a separate app for each tier or domain you need to provision into.
 
 ## Gather New Relic credentials 
 
