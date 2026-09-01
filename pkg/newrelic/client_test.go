@@ -298,6 +298,44 @@ func TestGetUserByID_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetUserByID_FollowsDomainCursor(t *testing.T) {
+	// The user lives in the second page of authentication domains. A GetUserByID that
+	// only reads the first page would wrongly report this user as not found.
+	const wantID = "user-on-page-2"
+	var requests int
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body GraphqlBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+
+		if body.Variables["domainCursor"] == nil {
+			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"nextCursor":"page-2","authenticationDomains":[{"users":{"users":[]}}]}}}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(userByIDResponse(wantID, "user2@example.com", "User Two")))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), wantID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if user == nil || user.ID != wantID {
+		t.Errorf("expected %s from the second domain page, got %+v", wantID, user)
+	}
+	if requests != 2 {
+		t.Errorf("expected GetUserByID to follow the domain cursor across 2 requests, got %d", requests)
+	}
+}
+
 // --- T7: RemoveUserFromGroup treats not-found as success (idempotent revoke) ---
 //
 // RemoveUserFromGroup uses isNotFoundErrStrict (errorClass == NOT_FOUND only), not

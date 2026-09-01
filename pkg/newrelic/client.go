@@ -595,27 +595,43 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 
 // GetUserByID looks up a user by their NerdGraph user id across all authentication
 // domains in the org (domainId is intentionally omitted, the same way ListUsers
-// supports an org-wide scan). Returns nil, nil if no user with that id exists.
+// supports an org-wide scan). Follows the authenticationDomains cursor the same way
+// ListAllDomains does, so an org with more domains than fit on one page is scanned
+// in full rather than only checked against the first page. Returns nil, nil if no
+// user with that id exists in any domain.
 func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
-	var res GetUserByIDResponse
-	body := &GraphqlBody{
-		Query:     composeGetUserByIDQuery(),
-		Variables: map[string]interface{}{userIDKey: userId},
-	}
-	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
-		return nil, fmt.Errorf("GetUserByID request failed: %w", err)
-	}
-	if len(res.Errors) > 0 {
-		return nil, fmt.Errorf("GetUserByID failed: %s", res.Errors[0].Message)
-	}
-	for _, domain := range res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
-		for _, u := range domain.Users.Users {
-			if u.ID == userId {
-				return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
+	cursor := ""
+	for {
+		var res GetUserByIDResponse
+		variables := map[string]interface{}{userIDKey: userId}
+		if cursor != "" {
+			variables["domainCursor"] = cursor
+		}
+		body := &GraphqlBody{
+			Query:     composeGetUserByIDQuery(),
+			Variables: variables,
+		}
+		if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+			return nil, fmt.Errorf("GetUserByID request failed: %w", err)
+		}
+		if len(res.Errors) > 0 {
+			return nil, fmt.Errorf("GetUserByID failed: %s", res.Errors[0].Message)
+		}
+
+		domains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains
+		for _, domain := range domains.AuthenticationDomains {
+			for _, u := range domain.Users.Users {
+				if u.ID == userId {
+					return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
+				}
 			}
 		}
+
+		if domains.NextCursor == "" {
+			return nil, nil
+		}
+		cursor = domains.NextCursor
 	}
-	return nil, nil
 }
 
 // CreateUser creates a new user in the given authentication domain.

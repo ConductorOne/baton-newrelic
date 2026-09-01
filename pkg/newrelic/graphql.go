@@ -354,13 +354,16 @@ func composeGetUserByEmailQuery() string {
 // composeGetUserByIDQuery returns a NerdGraph query that looks up a user by id across
 // all authentication domains in the org (domainId is intentionally omitted). Filtering
 // on a nonexistent id returns an empty users[] list with no errors, which is what
-// makes this usable as an existence check ahead of DeleteUser.
+// makes this usable as an existence check ahead of DeleteUser. Paginates
+// authenticationDomains itself via $domainCursor, the same connection ListAllDomains
+// follows, so an org with more domains than fit on one page isn't scanned partially.
 func composeGetUserByIDQuery() string {
-	return `query GetUserByID($userId: ID!) {
+	return `query GetUserByID($userId: ID!, $domainCursor: String) {
 		actor {
 			organization {
 				userManagement {
-					authenticationDomains {
+					authenticationDomains(cursor: $domainCursor) {
+						nextCursor
 						authenticationDomains {
 							users(filter: {id: {eq: $userId}}) {
 								users {
@@ -669,6 +672,7 @@ type GetUserByIDResponse struct {
 			Organization struct {
 				UserManagement struct {
 					AuthenticationDomains struct {
+						NextCursor            string `json:"nextCursor"`
 						AuthenticationDomains []struct {
 							Users struct {
 								Users []UserV2 `json:"users"`

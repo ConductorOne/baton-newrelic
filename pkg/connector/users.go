@@ -13,6 +13,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -286,6 +287,12 @@ func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *
 		return nil, fmt.Errorf("baton-newrelic: failed to check for existing user %s: %w", resourceId.GetResource(), err)
 	}
 	if existing == nil {
+		// GetUserByID's empty result is ambiguous: it means the user is gone, but it
+		// would also be produced by a credential that can't see the user's authentication
+		// domain. Warn rather than silently reporting success, so a false no-op here is
+		// at least traceable.
+		ctxzap.Extract(ctx).Warn("delete: user not found by id, treating as already deleted",
+			zap.String("user_id", resourceId.GetResource()))
 		return nil, nil
 	}
 
