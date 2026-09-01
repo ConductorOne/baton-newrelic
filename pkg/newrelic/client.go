@@ -595,12 +595,15 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 
 // GetUserByID looks up a user by their NerdGraph user id across all authentication
 // domains in the org (domainId is intentionally omitted, the same way ListUsers
-// supports an org-wide scan). Follows the authenticationDomains cursor the same way
-// ListAllDomains does, so an org with more domains than fit on one page is scanned
-// in full rather than only checked against the first page. Returns nil, nil if no
-// user with that id exists in any domain.
+// supports an org-wide scan). Follows the cursor on organization.userManagement.
+// authenticationDomains — a distinct connection from the one ListAllDomains
+// paginates (organization.authorizationManagement.authenticationDomains), but with
+// the same pagination shape — so an org with more domains than fit on one page is
+// scanned in full rather than only checked against the first page. Returns nil, nil
+// if no user with that id exists in any domain.
 func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
 	cursor := ""
+	domainsSeen := 0
 	for {
 		var res GetUserByIDResponse
 		variables := map[string]interface{}{userIDKey: userId}
@@ -619,6 +622,7 @@ func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) 
 		}
 
 		domains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains
+		domainsSeen += len(domains.AuthenticationDomains)
 		for _, domain := range domains.AuthenticationDomains {
 			for _, u := range domain.Users.Users {
 				if u.ID == userId {
@@ -628,6 +632,14 @@ func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) 
 		}
 
 		if domains.NextCursor == "" {
+			if domainsSeen == 0 {
+				// A real org always has at least one authentication domain, so seeing
+				// none is a sign the credential can't see any of them, not that the
+				// org has none. Treat that as indeterminate rather than "not found":
+				// callers should fall back to their own next step (e.g. attempting the
+				// operation directly) instead of trusting this as a confirmed absence.
+				return nil, fmt.Errorf("GetUserByID: no authentication domains visible to this credential")
+			}
 			return nil, nil
 		}
 		cursor = domains.NextCursor

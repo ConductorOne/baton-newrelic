@@ -279,13 +279,14 @@ func (u *userBuilder) orgParentID(ctx context.Context) *v2.ResourceId {
 // (idempotent). NerdGraph's delete mutation returns the same errorClass and message
 // for "user not found" as for "user exists but you lack permission", so that
 // ambiguity is resolved here rather than trusting the mutation's own error response:
-// check existence first, and only call DeleteUser for a user known to still exist.
+// check existence first, and skip the mutation only when that check positively
+// confirms the user is already gone. Any other outcome — the user still exists, or
+// the check itself couldn't reach a conclusion — falls through to calling
+// DeleteUser, so its response (not an inconclusive pre-check) is what surfaces as
+// the real error if there is one.
 func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *v2.ResourceId) (annotations.Annotations, error) {
-	existing, err := u.client.GetUserByID(ctx, resourceId.GetResource())
-	if err != nil {
-		return nil, fmt.Errorf("baton-newrelic: failed to check for existing user %s: %w", resourceId.GetResource(), err)
-	}
-	if existing == nil {
+	existing, checkErr := u.client.GetUserByID(ctx, resourceId.GetResource())
+	if checkErr == nil && existing == nil {
 		return nil, nil
 	}
 

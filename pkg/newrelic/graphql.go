@@ -355,8 +355,10 @@ func composeGetUserByEmailQuery() string {
 // all authentication domains in the org (domainId is intentionally omitted). Filtering
 // on a nonexistent id returns an empty users[] list with no errors, which is what
 // makes this usable as an existence check ahead of DeleteUser. Paginates
-// authenticationDomains itself via $domainCursor, the same connection ListAllDomains
-// follows, so an org with more domains than fit on one page isn't scanned partially.
+// organization.userManagement.authenticationDomains itself via $domainCursor — a
+// distinct connection from the one ListAllDomains follows, but with the same
+// pagination shape — so an org with more domains than fit on one page isn't scanned
+// partially.
 func composeGetUserByIDQuery() string {
 	return `query GetUserByID($userId: ID!, $domainCursor: String) {
 		actor {

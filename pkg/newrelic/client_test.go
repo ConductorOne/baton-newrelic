@@ -298,6 +298,30 @@ func TestGetUserByID_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetUserByID_NoDomainsVisibleReturnsError(t *testing.T) {
+	// A credential that can't see any authentication domain gets back an empty
+	// authenticationDomains list, not a GraphQL error. A real org always has at
+	// least one domain, so this must be treated as indeterminate, not as proof the
+	// user doesn't exist.
+	noDomainsResponse := `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[]}}}}}}`
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(noDomainsResponse))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "some-id")
+	if err == nil {
+		t.Error("expected error when no authentication domains are visible, got nil")
+	}
+	if user != nil {
+		t.Errorf("expected nil user alongside the error, got %+v", user)
+	}
+}
+
 func TestGetUserByID_FollowsDomainCursor(t *testing.T) {
 	// The user lives in the second page of authentication domains. A GetUserByID that
 	// only reads the first page would wrongly report this user as not found.
