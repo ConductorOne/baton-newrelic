@@ -687,24 +687,13 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 	return nil
 }
 
-// DeleteUser permanently deletes a user. Returns nil if user is not found (idempotent).
-//
-// NerdGraph's userManagementDeleteUser returns the same errorClass and message for a
-// missing user as for a user the credential isn't authorized to see, so the mutation's
-// own error response can't distinguish "already deleted" from "no permission". A
-// pre-delete existence check via GetUserByID resolves that: if the user is already
-// gone, return success without ever calling the mutation. If the user exists but the
-// mutation still fails, the failure is a real error (most likely a permission problem)
-// and must not be swallowed.
+// DeleteUser permanently deletes a user. Returns nil if NerdGraph reports the user
+// as not found via errorClass NOT_FOUND specifically (isNotFoundErrStrict) — the
+// message alone is not a reliable signal, since NerdGraph reuses the same wording
+// for a permission error. Callers that need "already deleted" to be a no-op should
+// check existence with GetUserByID first, since a real deleted-vs-forbidden
+// distinction isn't recoverable from this call's own response alone.
 func (c *Client) DeleteUser(ctx context.Context, userId string) error {
-	existing, err := c.GetUserByID(ctx, userId)
-	if err != nil {
-		return fmt.Errorf("failed to check for existing user before delete: %w", err)
-	}
-	if existing == nil {
-		return nil
-	}
-
 	variables := map[string]interface{}{
 		userIDKey: userId,
 	}

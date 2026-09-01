@@ -275,8 +275,20 @@ func (u *userBuilder) orgParentID(ctx context.Context) *v2.ResourceId {
 	return rid
 }
 
-// Delete permanently removes a user. Returns success if the user is not found (idempotent).
+// Delete permanently removes a user. Returns success if the user is not found
+// (idempotent). NerdGraph's delete mutation returns the same errorClass and message
+// for "user not found" as for "user exists but you lack permission", so that
+// ambiguity is resolved here rather than trusting the mutation's own error response:
+// check existence first, and only call DeleteUser for a user known to still exist.
 func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *v2.ResourceId) (annotations.Annotations, error) {
+	existing, err := u.client.GetUserByID(ctx, resourceId.GetResource())
+	if err != nil {
+		return nil, fmt.Errorf("baton-newrelic: failed to check for existing user %s: %w", resourceId.GetResource(), err)
+	}
+	if existing == nil {
+		return nil, nil
+	}
+
 	if err := u.client.DeleteUser(ctx, resourceId.GetResource()); err != nil {
 		return nil, fmt.Errorf("baton-newrelic: failed to delete user %s: %w", resourceId.GetResource(), err)
 	}
