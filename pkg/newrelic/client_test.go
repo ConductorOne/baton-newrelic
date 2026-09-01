@@ -211,18 +211,17 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 	}
 }
 
-// --- T5: DeleteUser existence check (CXH-2334) ---
+// --- T5: DeleteUser existence check ---
 //
 // NerdGraph returns the identical errorClass (CLIENT_ERROR) and message ("Could not
 // find the target or you are unauthorized.") for a missing user id as for a user the
 // credential isn't authorized to see, so the delete mutation's own error response
-// can't tell those apart — verified against the live API, see CXH-2334. DeleteUser
-// now checks existence via GetUserByID first, so "already gone" is decided before the
-// mutation ever runs, and only a mutation failure against a user known to still exist
-// is treated as a real error.
+// can't tell those apart. DeleteUser now checks existence via GetUserByID first, so
+// "already gone" is decided before the mutation ever runs, and only a mutation
+// failure against a user known to still exist is treated as a real error.
 
 // emptyUsersResponse is the body NerdGraph returns for a users(filter: {id: {eq: ...}})
-// query that matches nobody: HTTP 200, empty users[] list, no errors — verified live.
+// query that matches nobody: HTTP 200, empty users[] list, no errors.
 const emptyUsersResponse = `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[]}}]}}}}}}`
 
 func userByIDResponse(id, email, name string) string {

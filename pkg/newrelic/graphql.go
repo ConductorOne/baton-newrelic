@@ -352,10 +352,9 @@ func composeGetUserByEmailQuery() string {
 }
 
 // composeGetUserByIDQuery returns a NerdGraph query that looks up a user by id across
-// all authentication domains in the org (domainId is intentionally omitted). Verified
-// against the live API: filtering on a nonexistent id returns an empty users[] list
-// with no errors, which is what makes this usable as an existence check ahead of
-// DeleteUser.
+// all authentication domains in the org (domainId is intentionally omitted). Filtering
+// on a nonexistent id returns an empty users[] list with no errors, which is what
+// makes this usable as an existence check ahead of DeleteUser.
 func composeGetUserByIDQuery() string {
 	return `query GetUserByID($userId: ID!) {
 		actor {

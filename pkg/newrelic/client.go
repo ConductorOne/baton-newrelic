@@ -602,7 +602,7 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 // you are unauthorized.") for both "user doesn't exist" and "user exists but you
 // lack permission", so the delete mutation's own error response can't tell those
 // apart. A pre-delete existence check can, because a missing id here comes back as
-// an empty users[] list with no errors — verified against the live API.
+// an empty users[] list with no errors.
 func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
 	var res GetUserByIDResponse
 	body := &GraphqlBody{
