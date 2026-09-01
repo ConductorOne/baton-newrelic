@@ -593,6 +593,38 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 	return nil, nil
 }
 
+// GetUserByID looks up a user by their NerdGraph user id across all authentication
+// domains in the org (domainId is intentionally omitted, the same way ListUsers
+// supports an org-wide scan). Returns nil, nil if no user with that id exists.
+//
+// This exists specifically to make DeleteUser idempotent: NerdGraph returns the
+// identical errorClass ("CLIENT_ERROR") and message ("Could not find the target or
+// you are unauthorized.") for both "user doesn't exist" and "user exists but you
+// lack permission", so the delete mutation's own error response can't tell those
+// apart. A pre-delete existence check can, because a missing id here comes back as
+// an empty users[] list with no errors — verified against the live API.
+func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
+	var res GetUserByIDResponse
+	body := &GraphqlBody{
+		Query:     composeGetUserByIDQuery(),
+		Variables: map[string]interface{}{userIDKey: userId},
+	}
+	if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+		return nil, fmt.Errorf("GetUserByID request failed: %w", err)
+	}
+	if len(res.Errors) > 0 {
+		return nil, fmt.Errorf("GetUserByID failed: %s", res.Errors[0].Message)
+	}
+	for _, domain := range res.Data.Actor.Organization.UserManagement.AuthenticationDomains.AuthenticationDomains {
+		for _, u := range domain.Users.Users {
+			if u.ID == userId {
+				return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 // CreateUser creates a new user in the given authentication domain.
 func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, userType string) (string, error) {
 	var res CreateUserResponse
@@ -656,7 +688,23 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 }
 
 // DeleteUser permanently deletes a user. Returns nil if user is not found (idempotent).
+//
+// NerdGraph's userManagementDeleteUser returns the same errorClass and message for a
+// missing user as for a user the credential isn't authorized to see, so the mutation's
+// own error response can't distinguish "already deleted" from "no permission". A
+// pre-delete existence check via GetUserByID resolves that: if the user is already
+// gone, return success without ever calling the mutation. If the user exists but the
+// mutation still fails, the failure is a real error (most likely a permission problem)
+// and must not be swallowed.
 func (c *Client) DeleteUser(ctx context.Context, userId string) error {
+	existing, err := c.GetUserByID(ctx, userId)
+	if err != nil {
+		return fmt.Errorf("failed to check for existing user before delete: %w", err)
+	}
+	if existing == nil {
+		return nil
+	}
+
 	variables := map[string]interface{}{
 		userIDKey: userId,
 	}

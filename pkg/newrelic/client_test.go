@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -210,21 +211,80 @@ func TestGetUserByEmail_NotFound(t *testing.T) {
 	}
 }
 
-// --- T5: DeleteUser treats NR not-found as success ---
+// --- T5: DeleteUser existence check (CXH-2334) ---
+//
+// NerdGraph returns the identical errorClass (CLIENT_ERROR) and message ("Could not
+// find the target or you are unauthorized.") for a missing user id as for a user the
+// credential isn't authorized to see, so the delete mutation's own error response
+// can't tell those apart — verified against the live API, see CXH-2334. DeleteUser
+// now checks existence via GetUserByID first, so "already gone" is decided before the
+// mutation ever runs, and only a mutation failure against a user known to still exist
+// is treated as a real error.
 
-func TestDeleteUser_NotFoundIsSuccess(t *testing.T) {
-	notFoundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// emptyUsersResponse is the body NerdGraph returns for a users(filter: {id: {eq: ...}})
+// query that matches nobody: HTTP 200, empty users[] list, no errors — verified live.
+const emptyUsersResponse = `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[]}}]}}}}}}`
+
+func userByIDResponse(id, email, name string) string {
+	return fmt.Sprintf(
+		`{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[{"id":%q,"email":%q,"name":%q}]}}]}}}}}}`,
+		id, email, name)
+}
+
+func TestDeleteUser_AlreadyGoneNeverCallsMutation(t *testing.T) {
+	var mutationCalled bool
+	dispatchHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body GraphqlBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"NOT_FOUND"}}]}`))
+		if strings.Contains(body.Query, "GetUserByID") {
+			_, _ = w.Write([]byte(emptyUsersResponse))
+			return
+		}
+		mutationCalled = true
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Could not find the target or you are unauthorized.","extensions":{"errorClass":"CLIENT_ERROR"}}]}`))
 	})
-	srv := httptest.NewServer(accountsHandler(notFoundHandler))
+	srv := httptest.NewServer(accountsHandler(dispatchHandler))
 	defer srv.Close()
 
 	client := newTestClient(t, srv.URL)
 
 	if err := client.DeleteUser(context.Background(), "missing-id"); err != nil {
-		t.Errorf("DeleteUser should return nil for not-found, got: %v", err)
+		t.Errorf("DeleteUser should return nil when GetUserByID finds no user, got: %v", err)
+	}
+	if mutationCalled {
+		t.Error("DeleteUser should not call the delete mutation once the pre-check finds no user")
+	}
+}
+
+func TestDeleteUser_ExistsButMutationFailsSurfacesAsError(t *testing.T) {
+	// The user exists (pre-check finds them), but the delete mutation itself fails with
+	// NerdGraph's verbatim CLIENT_ERROR/"already unauthorized" response — most likely a
+	// real permission problem. This must surface as an error, not be swallowed, so C1
+	// never marks an account deprovisioned when it still has access.
+	dispatchHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body GraphqlBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(body.Query, "GetUserByID") {
+			_, _ = w.Write([]byte(userByIDResponse("user-1", "user1@example.com", "User One")))
+			return
+		}
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Could not find the target or you are unauthorized.","extensions":{"errorClass":"CLIENT_ERROR"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(dispatchHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	if err := client.DeleteUser(context.Background(), "user-1"); err == nil {
+		t.Error("DeleteUser should return error when the mutation fails for a user known to still exist, got nil")
 	}
 }
 
@@ -232,18 +292,66 @@ func TestDeleteUser_ForbiddenSurfacesAsError(t *testing.T) {
 	// NerdGraph returns FORBIDDEN even when the message uses NR's ambiguous literal.
 	// DeleteUser must surface this as an error — not silently succeed — so C1 does
 	// not mark an account deprovisioned when it still has access.
-	forbiddenHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	dispatchHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body GraphqlBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		if strings.Contains(body.Query, "GetUserByID") {
+			_, _ = w.Write([]byte(userByIDResponse("user-1", "user1@example.com", "User One")))
+			return
+		}
 		_, _ = w.Write([]byte(`{"errors":[{"message":"could not find the target or you are unauthorized.","extensions":{"errorClass":"FORBIDDEN"}}]}`))
 	})
-	srv := httptest.NewServer(accountsHandler(forbiddenHandler))
+	srv := httptest.NewServer(accountsHandler(dispatchHandler))
 	defer srv.Close()
 
 	client := newTestClient(t, srv.URL)
 
 	if err := client.DeleteUser(context.Background(), "user-1"); err == nil {
 		t.Error("DeleteUser should return error for FORBIDDEN, got nil")
+	}
+}
+
+// --- T5b: GetUserByID ---
+
+func TestGetUserByID_Found(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(userByIDResponse("user-1", "user1@example.com", "User One")))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if user == nil || user.ID != "user-1" {
+		t.Errorf("expected user-1, got %+v", user)
+	}
+}
+
+func TestGetUserByID_NotFound(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(emptyUsersResponse))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "missing-id")
+	if err != nil {
+		t.Fatalf("GetUserByID: unexpected error: %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected nil user for missing id, got %+v", user)
 	}
 }
 
