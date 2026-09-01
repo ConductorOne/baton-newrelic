@@ -596,13 +596,6 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 // GetUserByID looks up a user by their NerdGraph user id across all authentication
 // domains in the org (domainId is intentionally omitted, the same way ListUsers
 // supports an org-wide scan). Returns nil, nil if no user with that id exists.
-//
-// This exists specifically to make DeleteUser idempotent: NerdGraph returns the
-// identical errorClass ("CLIENT_ERROR") and message ("Could not find the target or
-// you are unauthorized.") for both "user doesn't exist" and "user exists but you
-// lack permission", so the delete mutation's own error response can't tell those
-// apart. A pre-delete existence check can, because a missing id here comes back as
-// an empty users[] list with no errors.
 func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
 	var res GetUserByIDResponse
 	body := &GraphqlBody{
