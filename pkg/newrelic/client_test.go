@@ -84,6 +84,28 @@ func TestAddUserToGroup_GraphQLErrorHTTP200(t *testing.T) {
 	}
 }
 
+// TestAddUserToGroup_AlreadyMemberIsErrAlreadyMember uses NerdGraph's verbatim
+// duplicate-membership response — errorClass SERVER_ERROR, message "Validation
+// failed: Group has already been taken" — as observed in production (CXH-2333).
+// A fixture using invented wording or errorClass would pass without exercising
+// the real matcher path.
+func TestAddUserToGroup_AlreadyMemberIsErrAlreadyMember(t *testing.T) {
+	mutHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"errors":[{"message":"Validation failed: Group has already been taken","extensions":{"errorClass":"SERVER_ERROR"}}]}`))
+	})
+	srv := httptest.NewServer(accountsHandler(mutHandler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	err := client.AddUserToGroup(context.Background(), "group-1", "user-1")
+	if !errors.Is(err, ErrAlreadyMember) {
+		t.Fatalf("expected ErrAlreadyMember, got %v", err)
+	}
+}
+
 // --- T6: GetUserByEmail returns v2 identity id via filtered query ---
 
 func TestGetUserByEmail_ReturnsV2ID(t *testing.T) {

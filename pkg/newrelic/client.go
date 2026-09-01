@@ -725,6 +725,7 @@ func isAlreadyMemberErr(e GraphqlError) bool {
 	return strings.Contains(lower, "already a member") ||
 		strings.Contains(lower, "already in the group") ||
 		strings.Contains(lower, "already added") ||
+		strings.Contains(lower, "already been taken") ||
 		strings.Contains(lower, "duplicate")
 }
 

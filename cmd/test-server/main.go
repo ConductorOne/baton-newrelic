@@ -103,7 +103,8 @@ type gqlRequest struct {
 }
 
 type gqlError struct {
-	Message string `json:"message"`
+	Message    string                 `json:"message"`
+	Extensions map[string]interface{} `json:"extensions,omitempty"`
 }
 
 func gqlOK(data interface{}) interface{} {
@@ -113,6 +114,13 @@ func gqlOK(data interface{}) interface{} {
 func gqlErr(msg string) interface{} {
 	return map[string]interface{}{
 		"errors": []gqlError{{Message: msg}},
+		"data":   nil,
+	}
+}
+
+func gqlErrWithClass(msg, errorClass string) interface{} {
+	return map[string]interface{}{
+		"errors": []gqlError{{Message: msg, Extensions: map[string]interface{}{"errorClass": errorClass}}},
 		"data":   nil,
 	}
 }
@@ -215,6 +223,9 @@ func (s *store) handleAddUsersToGroups(vars map[string]interface{}) interface{} 
 	g, ok := s.groups[groupID]
 	if !ok {
 		return gqlErr(fmt.Sprintf("group %s not found", groupID))
+	}
+	if g.Members[userID] {
+		return gqlErrWithClass("Validation failed: Group has already been taken", "SERVER_ERROR")
 	}
 	g.Members[userID] = true
 
