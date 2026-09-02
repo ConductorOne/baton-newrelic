@@ -13,6 +13,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -288,6 +289,10 @@ func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *
 	existing, checkErr := u.client.GetUserByID(ctx, resourceId.GetResource())
 	if checkErr == nil && existing == nil {
 		return nil, nil
+	}
+	if checkErr != nil {
+		ctxzap.Extract(ctx).Debug("delete: user existence pre-check inconclusive, falling through to delete",
+			zap.String("user_id", resourceId.GetResource()), zap.Error(checkErr))
 	}
 
 	if err := u.client.DeleteUser(ctx, resourceId.GetResource()); err != nil {
