@@ -13,6 +13,7 @@ import (
 	"github.com/conductorone/baton-sdk/pkg/pagination"
 	"github.com/conductorone/baton-sdk/pkg/types/resource"
 	"github.com/grpc-ecosystem/go-grpc-middleware/logging/zap/ctxzap"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -275,8 +276,25 @@ func (u *userBuilder) orgParentID(ctx context.Context) *v2.ResourceId {
 	return rid
 }
 
-// Delete permanently removes a user. Returns success if the user is not found (idempotent).
+// Delete permanently removes a user. Returns success if the user is not found
+// (idempotent). NerdGraph's delete mutation returns the same errorClass and message
+// for "user not found" as for "user exists but you lack permission", so that
+// ambiguity is resolved here rather than trusting the mutation's own error response:
+// check existence first, and skip the mutation only when that check positively
+// confirms the user is already gone. Any other outcome — the user still exists, or
+// the check itself couldn't reach a conclusion — falls through to calling
+// DeleteUser, so its response (not an inconclusive pre-check) is what surfaces as
+// the real error if there is one.
 func (u *userBuilder) Delete(ctx context.Context, resourceId *v2.ResourceId, _ *v2.ResourceId) (annotations.Annotations, error) {
+	existing, checkErr := u.client.GetUserByID(ctx, resourceId.GetResource())
+	if checkErr == nil && existing == nil {
+		return nil, nil
+	}
+	if checkErr != nil {
+		ctxzap.Extract(ctx).Debug("delete: user existence pre-check inconclusive, falling through to delete",
+			zap.String("user_id", resourceId.GetResource()), zap.Error(checkErr))
+	}
+
 	if err := u.client.DeleteUser(ctx, resourceId.GetResource()); err != nil {
 		return nil, fmt.Errorf("baton-newrelic: failed to delete user %s: %w", resourceId.GetResource(), err)
 	}

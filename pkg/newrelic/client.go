@@ -593,6 +593,59 @@ func (c *Client) GetUserByEmail(ctx context.Context, domainId, email string) (*U
 	return nil, nil
 }
 
+// GetUserByID looks up a user by their NerdGraph user id across all authentication
+// domains in the org (domainId is intentionally omitted, the same way ListUsers
+// supports an org-wide scan). Follows the cursor on organization.userManagement.
+// authenticationDomains — a distinct connection from the one ListAllDomains
+// paginates (organization.authorizationManagement.authenticationDomains), but with
+// the same pagination shape — so an org with more domains than fit on one page is
+// scanned in full rather than only checked against the first page. Returns nil, nil
+// if no user with that id exists in any domain.
+func (c *Client) GetUserByID(ctx context.Context, userId string) (*User, error) {
+	cursor := ""
+	domainsSeen := 0
+	for {
+		var res GetUserByIDResponse
+		variables := map[string]interface{}{userIDKey: userId}
+		if cursor != "" {
+			variables["domainCursor"] = cursor
+		}
+		body := &GraphqlBody{
+			Query:     composeGetUserByIDQuery(),
+			Variables: variables,
+		}
+		if err := doRawRequest(ctx, c.httpClient, c.baseURL.String(), c.apikey, body, &res); err != nil {
+			return nil, fmt.Errorf("GetUserByID request failed: %w", err)
+		}
+		if len(res.Errors) > 0 {
+			return nil, fmt.Errorf("GetUserByID failed: %s", res.Errors[0].Message)
+		}
+
+		domains := res.Data.Actor.Organization.UserManagement.AuthenticationDomains
+		domainsSeen += len(domains.AuthenticationDomains)
+		for _, domain := range domains.AuthenticationDomains {
+			for _, u := range domain.Users.Users {
+				if u.ID == userId {
+					return &User{ID: u.ID, Email: u.Email, Name: u.Name}, nil
+				}
+			}
+		}
+
+		if domains.NextCursor == "" {
+			if domainsSeen == 0 {
+				// A real org always has at least one authentication domain, so seeing
+				// none is a sign the credential can't see any of them, not that the
+				// org has none. Treat that as indeterminate rather than "not found":
+				// callers should fall back to their own next step (e.g. attempting the
+				// operation directly) instead of trusting this as a confirmed absence.
+				return nil, fmt.Errorf("GetUserByID: no authentication domains visible to this credential")
+			}
+			return nil, nil
+		}
+		cursor = domains.NextCursor
+	}
+}
+
 // CreateUser creates a new user in the given authentication domain.
 func (c *Client) CreateUser(ctx context.Context, authDomainId, email, name, userType string) (string, error) {
 	var res CreateUserResponse
@@ -655,7 +708,12 @@ func (c *Client) UpdateUser(ctx context.Context, userId, email, name, userType s
 	return nil
 }
 
-// DeleteUser permanently deletes a user. Returns nil if user is not found (idempotent).
+// DeleteUser permanently deletes a user. Returns nil if NerdGraph reports the user
+// as not found via errorClass NOT_FOUND specifically (isNotFoundErrStrict) — the
+// message alone is not a reliable signal, since NerdGraph reuses the same wording
+// for a permission error. Callers that need "already deleted" to be a no-op should
+// check existence with GetUserByID first, since a real deleted-vs-forbidden
+// distinction isn't recoverable from this call's own response alone.
 func (c *Client) DeleteUser(ctx context.Context, userId string) error {
 	variables := map[string]interface{}{
 		userIDKey: userId,

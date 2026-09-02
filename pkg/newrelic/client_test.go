@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -244,6 +245,118 @@ func TestDeleteUser_ForbiddenSurfacesAsError(t *testing.T) {
 
 	if err := client.DeleteUser(context.Background(), "user-1"); err == nil {
 		t.Error("DeleteUser should return error for FORBIDDEN, got nil")
+	}
+}
+
+// emptyUsersResponse is the body NerdGraph returns for a users(filter: {id: {eq: ...}})
+// query that matches nobody: HTTP 200, empty users[] list, no errors.
+const emptyUsersResponse = `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[]}}]}}}}}}`
+
+func userByIDResponse(id, email, name string) string {
+	return fmt.Sprintf(
+		`{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[{"id":%q,"email":%q,"name":%q}]}}]}}}}}}`,
+		id, email, name)
+}
+
+// --- T5b: GetUserByID ---
+
+func TestGetUserByID_Found(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(userByIDResponse("user-1", "user1@example.com", "User One")))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if user == nil || user.ID != "user-1" {
+		t.Errorf("expected user-1, got %+v", user)
+	}
+}
+
+func TestGetUserByID_NotFound(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(emptyUsersResponse))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "missing-id")
+	if err != nil {
+		t.Fatalf("GetUserByID: unexpected error: %v", err)
+	}
+	if user != nil {
+		t.Errorf("expected nil user for missing id, got %+v", user)
+	}
+}
+
+func TestGetUserByID_NoDomainsVisibleReturnsError(t *testing.T) {
+	// A credential that can't see any authentication domain gets back an empty
+	// authenticationDomains list, not a GraphQL error. A real org always has at
+	// least one domain, so this must be treated as indeterminate, not as proof the
+	// user doesn't exist.
+	noDomainsResponse := `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[]}}}}}}`
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(noDomainsResponse))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), "some-id")
+	if err == nil {
+		t.Error("expected error when no authentication domains are visible, got nil")
+	}
+	if user != nil {
+		t.Errorf("expected nil user alongside the error, got %+v", user)
+	}
+}
+
+func TestGetUserByID_FollowsDomainCursor(t *testing.T) {
+	// The user lives in the second page of authentication domains. A GetUserByID that
+	// only reads the first page would wrongly report this user as not found.
+	const wantID = "user-on-page-2"
+	var requests int
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body GraphqlBody
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+
+		if body.Variables["domainCursor"] == nil {
+			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"nextCursor":"page-2","authenticationDomains":[{"users":{"users":[]}}]}}}}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(userByIDResponse(wantID, "user2@example.com", "User Two")))
+	})
+	srv := httptest.NewServer(accountsHandler(handler))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL)
+
+	user, err := client.GetUserByID(context.Background(), wantID)
+	if err != nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	if user == nil || user.ID != wantID {
+		t.Errorf("expected %s from the second domain page, got %+v", wantID, user)
+	}
+	if requests != 2 {
+		t.Errorf("expected GetUserByID to follow the domain cursor across 2 requests, got %d", requests)
 	}
 }
 

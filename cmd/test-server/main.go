@@ -118,6 +118,9 @@ func gqlErr(msg string) interface{} {
 	}
 }
 
+// gqlErrWithClass returns a GraphQL error carrying an errorClass extension, matching
+// NerdGraph's actual response shape (as opposed to gqlErr, which is a bare message
+// the live API never actually sends on its own).
 func gqlErrWithClass(msg, errorClass string) interface{} {
 	return map[string]interface{}{
 		"errors": []gqlError{{Message: msg, Extensions: map[string]interface{}{"errorClass": errorClass}}},
@@ -201,6 +204,13 @@ func (s *store) handleDeleteUser(vars map[string]interface{}) interface{} {
 	defer s.mu.Unlock()
 
 	id, _ := vars[keyUserID].(string)
+	if _, ok := s.users[id]; !ok {
+		// Matches NerdGraph's verbatim response for userManagementDeleteUser against a
+		// missing user id: errorClass CLIENT_ERROR, with a message that also covers
+		// permission-denied, so callers can't tell the two apart from this alone.
+		return gqlErrWithClass("Could not find the target or you are unauthorized.", "CLIENT_ERROR")
+	}
+
 	delete(s.users, id)
 	for _, g := range s.groups {
 		delete(g.Members, id)
@@ -358,6 +368,40 @@ func (s *store) handleGetUserByEmailQuery(vars map[string]interface{}) interface
 			})
 			break
 		}
+	}
+
+	return gqlOK(map[string]interface{}{
+		keyActor: map[string]interface{}{
+			keyOrganization: map[string]interface{}{
+				keyUserMgmt: map[string]interface{}{
+					keyAuthDomains: map[string]interface{}{
+						keyAuthDomains: []map[string]interface{}{
+							{
+								keyUsers: map[string]interface{}{
+									keyUsers: userList,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
+func (s *store) handleGetUserByIDQuery(vars map[string]interface{}) interface{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id, _ := vars[keyUserID].(string)
+
+	userList := make([]map[string]interface{}, 0, 1)
+	if u, ok := s.users[id]; ok {
+		userList = append(userList, map[string]interface{}{
+			keyID:    u.ID,
+			keyEmail: u.Email,
+			keyName:  u.Name,
+		})
 	}
 
 	return gqlOK(map[string]interface{}{
@@ -611,6 +655,8 @@ func (s *store) dispatch(req gqlRequest) interface{} {
 		return handleOrgQuery()
 	case strings.Contains(q, "GetUserByEmail"):
 		return s.handleGetUserByEmailQuery(vars)
+	case strings.Contains(q, "GetUserByID"):
+		return s.handleGetUserByIDQuery(vars)
 	case strings.Contains(q, "ListRoles"):
 		return handleRolesQuery()
 	case strings.Contains(q, "ListDomains"):

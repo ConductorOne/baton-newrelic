@@ -183,3 +183,224 @@ func TestCreateAccount_ExplicitUserTypeSucceeds(t *testing.T) {
 		t.Errorf("created user id = %q, want %q", got, wantUserID)
 	}
 }
+
+// --- Delete: existence check resolves NerdGraph's not-found/forbidden ambiguity ---
+//
+// userManagementDeleteUser returns the same errorClass and message for a missing
+// user as for a user the credential isn't authorized to see, so Delete checks
+// existence via GetUserByID first rather than trusting the mutation's own error
+// response for that distinction.
+
+// userByIDFoundResponse is the GetUserByID query response body for a single
+// authentication domain containing the given user.
+const userByIDFoundResponse = `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":` +
+	`{"authenticationDomains":[{"users":{"users":[{"id":"user-1","email":"user1@example.com","name":"User One"}]}}]}}}}}}`
+
+const userByIDNotFoundResponse = `{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[{"users":{"users":[]}}]}}}}}}`
+
+func TestDelete_AlreadyGoneNeverCallsMutation(t *testing.T) {
+	accountCalled := false
+	mutationCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if !accountCalled {
+			accountCalled = true
+			_, _ = w.Write([]byte(`{"data":{"actor":{"accounts":[{"id":1}]}}}`))
+			return
+		}
+
+		var body struct {
+			Query string `json:"query"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&body); decodeErr != nil {
+			t.Errorf("decode request body: %v", decodeErr)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		switch {
+		case strings.Contains(body.Query, "GetUserByID"):
+			_, _ = w.Write([]byte(userByIDNotFoundResponse))
+		case strings.Contains(body.Query, "userManagementDeleteUser"):
+			mutationCalled = true
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Could not find the target or you are unauthorized.","extensions":{"errorClass":"CLIENT_ERROR"}}]}`))
+		default:
+			t.Errorf("unexpected query: %s", body.Query)
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := newrelic.NewClient(context.Background(), http.DefaultClient, "test-key", srv.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	u := &userBuilder{resourceType: userResourceType, client: client}
+	resourceId := v2.ResourceId_builder{ResourceType: userResourceType.Id, Resource: "missing-id"}.Build()
+
+	if _, err := u.Delete(context.Background(), resourceId, nil); err != nil {
+		t.Errorf("Delete should return nil when GetUserByID finds no user, got: %v", err)
+	}
+	if mutationCalled {
+		t.Error("Delete should not call the delete mutation once the pre-check finds no user")
+	}
+}
+
+func TestDelete_ExistsButMutationFailsSurfacesAsError(t *testing.T) {
+	// The user exists (pre-check finds them), but the delete mutation itself fails
+	// with NerdGraph's verbatim CLIENT_ERROR/"already unauthorized" response — most
+	// likely a real permission problem. This must surface as an error, not be
+	// swallowed, so C1 never marks an account deprovisioned when it still has access.
+	accountCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if !accountCalled {
+			accountCalled = true
+			_, _ = w.Write([]byte(`{"data":{"actor":{"accounts":[{"id":1}]}}}`))
+			return
+		}
+
+		var body struct {
+			Query string `json:"query"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&body); decodeErr != nil {
+			t.Errorf("decode request body: %v", decodeErr)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		switch {
+		case strings.Contains(body.Query, "GetUserByID"):
+			_, _ = w.Write([]byte(userByIDFoundResponse))
+		case strings.Contains(body.Query, "userManagementDeleteUser"):
+			_, _ = w.Write([]byte(`{"errors":[{"message":"Could not find the target or you are unauthorized.","extensions":{"errorClass":"CLIENT_ERROR"}}]}`))
+		default:
+			t.Errorf("unexpected query: %s", body.Query)
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := newrelic.NewClient(context.Background(), http.DefaultClient, "test-key", srv.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	u := &userBuilder{resourceType: userResourceType, client: client}
+	resourceId := v2.ResourceId_builder{ResourceType: userResourceType.Id, Resource: "user-1"}.Build()
+
+	if _, err := u.Delete(context.Background(), resourceId, nil); err == nil {
+		t.Error("Delete should return error when the mutation fails for a user known to still exist, got nil")
+	}
+}
+
+func TestDelete_ExistingUserCallsMutationAndSucceeds(t *testing.T) {
+	// The happy path: the user exists, the delete mutation succeeds, and Delete
+	// actually issues that mutation rather than skipping it.
+	accountCalled := false
+	mutationCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if !accountCalled {
+			accountCalled = true
+			_, _ = w.Write([]byte(`{"data":{"actor":{"accounts":[{"id":1}]}}}`))
+			return
+		}
+
+		var body struct {
+			Query string `json:"query"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&body); decodeErr != nil {
+			t.Errorf("decode request body: %v", decodeErr)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		switch {
+		case strings.Contains(body.Query, "GetUserByID"):
+			_, _ = w.Write([]byte(userByIDFoundResponse))
+		case strings.Contains(body.Query, "userManagementDeleteUser"):
+			mutationCalled = true
+			_, _ = w.Write([]byte(`{"data":{"userManagementDeleteUser":{"deletedUser":{"id":"user-1"}}}}`))
+		default:
+			t.Errorf("unexpected query: %s", body.Query)
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := newrelic.NewClient(context.Background(), http.DefaultClient, "test-key", srv.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	u := &userBuilder{resourceType: userResourceType, client: client}
+	resourceId := v2.ResourceId_builder{ResourceType: userResourceType.Id, Resource: "user-1"}.Build()
+
+	if _, err := u.Delete(context.Background(), resourceId, nil); err != nil {
+		t.Errorf("Delete should return nil for a successful delete, got: %v", err)
+	}
+	if !mutationCalled {
+		t.Error("Delete should call the delete mutation for a user confirmed to exist")
+	}
+}
+
+func TestDelete_InconclusiveCheckFallsThroughToMutation(t *testing.T) {
+	// GetUserByID can't reach a conclusion (e.g. no authentication domains are
+	// visible to this credential, or the request itself fails). Delete must not
+	// treat that as "already deleted" — it should still call DeleteUser and let its
+	// response, not an inconclusive pre-check, decide the outcome.
+	accountCalled := false
+	mutationCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if !accountCalled {
+			accountCalled = true
+			_, _ = w.Write([]byte(`{"data":{"actor":{"accounts":[{"id":1}]}}}`))
+			return
+		}
+
+		var body struct {
+			Query string `json:"query"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&body); decodeErr != nil {
+			t.Errorf("decode request body: %v", decodeErr)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+
+		switch {
+		case strings.Contains(body.Query, "GetUserByID"):
+			// No authentication domains visible: indeterminate, per GetUserByID's own
+			// contract, not a confirmed "not found".
+			_, _ = w.Write([]byte(`{"data":{"actor":{"organization":{"userManagement":{"authenticationDomains":{"authenticationDomains":[]}}}}}}`))
+		case strings.Contains(body.Query, "userManagementDeleteUser"):
+			mutationCalled = true
+			_, _ = w.Write([]byte(`{"data":{"userManagementDeleteUser":{"deletedUser":{"id":"user-1"}}}}`))
+		default:
+			t.Errorf("unexpected query: %s", body.Query)
+			http.Error(w, "unexpected query", http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	client, err := newrelic.NewClient(context.Background(), http.DefaultClient, "test-key", srv.URL)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	u := &userBuilder{resourceType: userResourceType, client: client}
+	resourceId := v2.ResourceId_builder{ResourceType: userResourceType.Id, Resource: "user-1"}.Build()
+
+	if _, err := u.Delete(context.Background(), resourceId, nil); err != nil {
+		t.Errorf("Delete should return nil when the mutation succeeds despite an inconclusive check, got: %v", err)
+	}
+	if !mutationCalled {
+		t.Error("Delete should call the delete mutation when the existence check is inconclusive, not treat it as already-deleted")
+	}
+}

@@ -351,6 +351,37 @@ func composeGetUserByEmailQuery() string {
 	}`
 }
 
+// composeGetUserByIDQuery returns a NerdGraph query that looks up a user by id across
+// all authentication domains in the org (domainId is intentionally omitted). Filtering
+// on a nonexistent id returns an empty users[] list with no errors, which is what
+// makes this usable as an existence check ahead of DeleteUser. Paginates
+// organization.userManagement.authenticationDomains itself via $domainCursor — a
+// distinct connection from the one ListAllDomains follows, but with the same
+// pagination shape — so an org with more domains than fit on one page isn't scanned
+// partially.
+func composeGetUserByIDQuery() string {
+	return `query GetUserByID($userId: ID!, $domainCursor: String) {
+		actor {
+			organization {
+				userManagement {
+					authenticationDomains(cursor: $domainCursor) {
+						nextCursor
+						authenticationDomains {
+							users(filter: {id: {eq: $userId}}) {
+								users {
+									id
+									email
+									name
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}`
+}
+
 func composeCreateUserMutation() string {
 	return `mutation CreateUser($authDomainId: ID!, $email: String!, $name: String!, $userType: UserManagementRequestedTierName!) {
 		userManagementCreateUser(
@@ -623,6 +654,27 @@ type GetUserByEmailResponse struct {
 			Organization struct {
 				UserManagement struct {
 					AuthenticationDomains struct {
+						AuthenticationDomains []struct {
+							Users struct {
+								Users []UserV2 `json:"users"`
+							} `json:"users"`
+						} `json:"authenticationDomains"`
+					} `json:"authenticationDomains"`
+				} `json:"userManagement"`
+			} `json:"organization"`
+		} `json:"actor"`
+	} `json:"data"`
+}
+
+// GetUserByIDResponse holds the result of a composeGetUserByIDQuery call.
+type GetUserByIDResponse struct {
+	GraphqlErrorResponse
+	Data struct {
+		Actor struct {
+			Organization struct {
+				UserManagement struct {
+					AuthenticationDomains struct {
+						NextCursor            string `json:"nextCursor"`
 						AuthenticationDomains []struct {
 							Users struct {
 								Users []UserV2 `json:"users"`
